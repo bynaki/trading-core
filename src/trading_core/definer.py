@@ -83,8 +83,12 @@ class DomainModel(Generic[Treq, T]):
             raise DomainError(f"같은 모델이 이미 등록되어 있다 - ({model_id})")
         self._domain_dict[model_id] = self
 
-    def on(self, cb: Callable[[T, str], AsyncIterator[Sequence[Treq]]]):
+    # def on(self, cb: Callable[[T, str], AsyncGenerator[Sequence[Treq], Any]]):
+    def on(
+        self, cb: Callable[[T, str], AsyncIterator[Sequence[Treq]]]
+    ) -> Callable[[T, str], AsyncIterator[Sequence[Treq]]]:
         self._on_cb = cb
+        return cb
 
 
 class DomainContext(Generic[Treq]):
@@ -92,7 +96,7 @@ class DomainContext(Generic[Treq]):
         self.req_model = req
 
 
-def domain(request_t: type[Treq], context_t: type[T] = DomainContext):
+def domain(request_t: type[Treq], context_t: type[T] = DomainContext[Treq]):
     def _(init_cb: Callable[[Treq], T]) -> DomainModel[Treq, T]:
         return DomainModel[Treq, T](init_cb, request_t)
     return _
