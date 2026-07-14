@@ -4,7 +4,7 @@ from contextlib import aclosing, asynccontextmanager
 from typing import Any, NotRequired, TypedDict, Unpack
 
 from .definer import GeneratorDefiner
-from .exceptions import StageError
+from .exceptions import DomainError, StageError
 from .helper import TaskManager
 from .model import (
     DataModel,
@@ -16,124 +16,7 @@ from .model import (
 )
 
 
-class DomainError(Exception): ...
-
-
-# from .definer import StageDefiner
-
-# from .model import RequestModel, get_model_id, DataModel, get_model_type
-# from typing import Protocol
-
-
-# class StageError(Exception): ...
-
-
-# class StageProtocol[T: RequestModel](Protocol):
-#     def __init__(self, req: T): ...
-#     async def update(self, symbols: set[str]) -> None: ...
-#     async def relay(self) -> DataModel: ...
-
-
-# class Stage[T: RequestModel]:
-#     def __init__(self, domain: Domain, req: T):
-#         self._domain = domain
-#         req_id = get_model_id(req)
-#         if definer := StageDefiner.get_definer(req_id):
-#             ...
-#         else:
-#             raise StageError(f"현재 요청한 'Request'는 정의되지 않았다. - {req}")
-#         self._definer = definer
-#         self._req = req
-#         if ctx := definer(req):
-#             ...
-#         else:
-#             ctx = req
-#         self._ctx = ctx
-
-#     async def update(self, symbols: set[str]):
-#         if update_cb := self._definer.get_update_callback(self._ctx):
-#             transmitter = await update_cb(symbols)
-
-
-#     # async def update(self, symbols: set[str]):
-#     #     for symbol in symbols:
-#     #         cb = self._definer._on_cb  # type: ignore
-#     #         async for sequence in cb(self._ctx, symbol):
-#     #             steps = sequence._steps  # type: ignore
-#     #             for step in steps:
-#     #                 sequence.req_model
-
-#     async def get(self) -> DataModel:
-#         ...
-
-
-# class Domain:
-#     def __init__(self) -> None:
-#         self._stage_set: set[Stage[RequestModel]] = set()
-
-#     async def stage(self, req: RequestModel, symbols: list[str]):
-#         for stage in self._stage_set:
-#             ttype = get_model_type(req)
-#             if ttype == "require":
-
-#             req.get_tr_content_id(exclude={"symbols"})
-
-
 class ClosedConnection(Exception): ...
-
-
-# class Node2[T: RequestModel]:
-#     def __init__(self, request: T, symbols: set[Sequence]) -> None:
-#         self._req = request
-#         self._sequence_dict: dict[str, set[Sequence[T]]] = {}
-
-
-# class Node[Treq: RequestModel]:
-#     def __init__(self, seq: Sequence[Treq]) -> None:
-#         self._seq = seq
-#         self._joins: set[Node] = set()
-
-#     @property
-#     def require(self) -> Treq:
-#         return self._seq.require
-
-#     @property
-#     def symbol(self) -> str:
-#         return self._seq.symbol
-
-#     async def invoke(self, input: DataModel) -> None:
-#         data = await self._seq.invoke(input)
-#         if not data:
-#             return
-#         if not self._joins:
-#             raise NodeError("'Join'할게 없으면 아웃풋 데이터는 'None'이어야 한다.")
-#         joins = list(self._joins)
-#         results: list[None | BaseException] = await gather(
-#             *[s.invoke(data) for s in joins], return_exceptions=True
-#         )
-#         errors: list[Exception] = []
-#         removing: set[Node] = set()
-#         for i, error in enumerate(results):
-#             if isinstance(error, ExceptionGroup):
-#                 # group = cast(ExceptionGroup[Exception], error)
-#                 errors.extend(error.exceptions)
-#             elif isinstance(error, Exception):
-#                 errors.append(error)
-#             removing.add(joins[i])
-#         self._joins -= removing
-#         if not self._joins:
-#             errors.append(NodeError("더이상 'Join'할게 없다."))
-#         if errors:
-#             raise ExceptionGroup("Sequence Error!!", errors)
-
-
-# class Require(Runnable):
-#     def __init__(self, req: RequestModel, symbols: set[str]) -> None:
-#         self.request = req
-#         self.symbols = symbols
-
-#     def set_edge(self, edge: Edge):
-#         self._edge = edge
 
 
 class Segment:
@@ -239,85 +122,8 @@ class Stage[Treq: RequestModel, Tput: Sender]:
     def context(self) -> Any:
         return self._params.get("context")
 
-    async def update(self, symbols: set[str]) -> None: ...
-
-
-# class Stage[Treq: RequestModel, Tput: Sender](Protocol):
-#     _domain: Domain
-#     _req: Treq
-#     _output: Tput
-#     _id: str
-
-#     def __init__(self, domain: Domain, req: Treq, output: Tput) -> None:
-#         self._domain = domain
-#         self._req = req
-#         self._output = output
-#         self._id = domain.generate_id(req)
-
-#     def get_domain(self) -> Domain:
-#         return self._domain
-
-#     @property
-#     def id(self) -> str:
-#         return self._id
-
-#     @property
-#     def req_model(self) -> Treq:
-#         return self._req
-
-#     @property
-#     def output(self) -> Tput:
-#         return self._output
-
-#     async def update(self, symbols: set[str]) -> None: ...
-
-
-# class GeneratorOriginStage[Treq: RequestModel, Tput: Sender](Stage[Treq, Tput]):
-#     def __init__(self, domain: Domain, req: Treq, output: Tput) -> None:
-#         super().__init__(domain, req, output)
-#         self._model_id = get_model_id(req)
-#         self._ctx = self._get_definer()
-
-#     def _get_definer(self) -> GeneratorDefiner:
-#         definer = GeneratorDefiner.get_definer(self._model_id)
-#         if definer is None:
-#             raise StageError(
-#                 f"요청한 'RequestModel'의 'Definer'를 찾을 수 없다. - {self._model_id}"
-#             )
-#         return definer
-
-#     async def update(self, symbols: set[str]) -> None:
-#         definer = self._get_definer()
-#         gen = definer.get_binder(self._ctx, symbols, None)
-#         if gen is None:
-#             raise StageError("'bind'되지 않았다.")
-
-#         async def _():
-#             async for data in gen():
-#                 await self._output(data)
-
-#         await self._domain.cancel_by_name(self.id)
-#         await self._domain.submit(_(), self.id)
-
-
-# class GeneratorStage[Treq: RequestModel, Tput: Sender](Stage[Treq, Tput]):
-#     def __init__(self, domain: Domain, req: Treq, output: Tput) -> None:
-#         super().__init__(domain, req, output)
-
-#     async def update(self, symbols: set[str]) -> None:
-#         content_id = self.req_model.get_tr_content_id(exclude={"symbols"})
-#         origin = self.get_domain().get_origin_stage(content_id)
-#         if origin is None:
-#             raise StageError(f"GeneratorOriginStage가 없다. - {content_id}")
-#         origin_output: SharedSender = origin.output  # type: ignore
-#         origin_output.set_sender(self.output, symbols)
-#         await origin.update(origin_output.symbols)
-
-
-# class ProcessorStage[Treq: RequestModel, Tput: Sender](Stage[Treq, Tput]):
-#     def __init__(self, domain: Domain, req: Treq, output: Tput) -> None: ...
-
-#     async def update(self, symbols: set[str]) -> None: ...
+    async def update(self, symbols: set[str]) -> None:
+        raise StageError("'update()'가 구현되지 않았다.")
 
 
 class Domain:
