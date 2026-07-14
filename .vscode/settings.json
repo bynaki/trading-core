@@ -1,0 +1,20 @@
+{
+  // 프로젝트 uv 가상환경 인터프리터
+  "python.defaultInterpreterPath": "${workspaceFolder}/.venv/bin/python",
+
+  // Ruff (charliermarsh.ruff): .venv에 설치된 ruff 사용 + 저장 시 포맷/정리
+  "ruff.importStrategy": "fromEnvironment",
+  "[python]": {
+    "editor.defaultFormatter": "charliermarsh.ruff",
+    "editor.formatOnSave": true,
+    "editor.codeActionsOnSave": {
+      "source.fixAll.ruff": "explicit",
+      "source.organizeImports.ruff": "explicit"
+    }
+  },
+
+  // 타입 체크는 pyright로 일원화 (CLI: uv run pyright, 설정은 pyproject [tool.pyright])
+  // Pylance / basedpyright 둘 중 무엇을 쓰든 standard로 맞춤
+  "python.analysis.typeCheckingMode": "standard",
+  "basedpyright.analysis.typeCheckingMode": "standard"
+}

@@ -8,12 +8,11 @@ import pytest
 
 from trading_core import (
     DataModel,
-    DomainContext,
-    DomainError,
+    DefineError,
     ModelError,
     RequestModel,
     Sequence,
-    domain,
+    processor,
     set_origin_name,
     task,
 )
@@ -70,6 +69,35 @@ class QuoteReq(RequestModel):
     pass
 
 
+def test_tr_require_caches_until_request_values_change() -> None:
+    class SourceReq(RequestModel):
+        symbols: list[str]
+
+    class RequiredReq(RequestModel):
+        symbols: list[str]
+
+    calls = 0
+
+    @SourceReq.require(RequiredReq)
+    def build_required(req: SourceReq) -> RequiredReq:
+        nonlocal calls
+        calls += 1
+        return RequiredReq(symbols=req.symbols)
+
+    req = SourceReq(symbols=["BTC"])
+
+    first = req.tr_require
+    assert first is req.tr_require
+    assert calls == 1
+
+    req.symbols.append("ETH")
+    changed = req.tr_require
+    assert changed is not first
+    assert isinstance(changed, RequiredReq)
+    assert changed.symbols == ["BTC", "ETH"]
+    assert calls == 2
+
+
 def test_request_model_builds_sequence_with_symbol() -> None:
     """RequestModel 을 symbol로 호출하면 그 심볼에 묶인 Sequence가 만들어진다.
 
@@ -79,7 +107,7 @@ def test_request_model_builds_sequence_with_symbol() -> None:
     seq = QuoteReq()("BTC")
     assert isinstance(seq, Sequence)
     assert seq.symbol == "BTC"
-    assert isinstance(seq.req_model, QuoteReq)
+    assert isinstance(seq.require, QuoteReq)
 
 
 def test_sequence_composition_preserves_symbol() -> None:
@@ -157,15 +185,15 @@ def test_domain_rejects_duplicate_registration() -> None:
     class DupReq(RequestModel):
         pass
 
-    @domain(DupReq)
-    def first(req: DupReq) -> DomainContext[DupReq]:
-        return DomainContext(req)
+    @processor(DupReq)
+    def first(req: DupReq) -> DupReq:
+        return req
 
-    with pytest.raises(DomainError):
+    with pytest.raises(DefineError):
 
-        @domain(DupReq)
-        def second(req: DupReq) -> DomainContext[DupReq]:
-            return DomainContext(req)
+        @processor(DupReq)
+        def second(req: DupReq) -> DupReq:
+            return req
 
 
 def test_set_origin_name_rejects_duplicate() -> None:

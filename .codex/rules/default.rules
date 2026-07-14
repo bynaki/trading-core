@@ -1,0 +1,38 @@
+# Migrated from .claude/settings.local.json.
+# These commands may run outside the sandbox without an approval prompt.
+
+prefix_rule(
+    pattern = ["uv", ["run", "add"]],
+    decision = "allow",
+    justification = "Project development commands use uv.",
+    match = [
+        "uv run pytest",
+        "uv run ruff check .",
+        "uv add pydantic",
+        "uv add --dev pytest",
+    ],
+    not_match = [
+        "uv sync",
+        "uv remove pydantic",
+    ],
+)
+
+prefix_rule(
+    pattern = ["git", "add"],
+    decision = "allow",
+    justification = "Allow staging project changes.",
+    match = [
+        "git add AGENTS.md",
+        "git add .",
+    ],
+)
+
+prefix_rule(
+    pattern = ["git", "commit"],
+    decision = "allow",
+    justification = "Allow creating local commits.",
+    match = [
+        "git commit -q -m migrate-config",
+        "git commit -m update",
+    ],
+)

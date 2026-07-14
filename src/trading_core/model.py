@@ -1,19 +1,18 @@
-from .helper import generate_id, verify_module, generate_digest
-from typing import (
-    TypedDict,
-    ClassVar,
-    Any,
-    Callable,
-    Self,
-    TypeVar,
-    Protocol,
-    Generic,
-)
-from asyncio import Queue
-from pydantic import BaseModel, PrivateAttr, computed_field
-from pydantic.main import IncEx
 import json
 import re
+from collections.abc import Callable
+from typing import (
+    Any,
+    ClassVar,
+    Protocol,
+    Self,
+    TypedDict,
+)
+
+from pydantic import BaseModel, PrivateAttr, computed_field
+from pydantic.main import IncEx
+
+from .helper import generate_digest, generate_id, verify_module
 
 
 class ModelError(Exception): ...
@@ -22,7 +21,7 @@ class ModelError(Exception): ...
 _origin_name: str = ""
 
 
-def set_origin_name(name: str):
+def set_origin_name(name: str) -> None:
     global _origin_name
     if _origin_name:
         raise ModelError(f"이미 출처 이름이 있다. - '{_origin_name}'")
@@ -52,9 +51,7 @@ class TrBaseModel(BaseModel):
     _tr_counter: ClassVar[int] = 0
     _tr_id: str = PrivateAttr(default="")
     _tr_origin_annotation: TrAnnotation | None = PrivateAttr(default=None)
-    _tr_cached_id: str | None = PrivateAttr(
-        default=None
-    )  # 내부에서만 쓰는 캐시 (직렬화 시 숨겨짐)
+    _tr_cached_id: str | None = PrivateAttr(default=None)  # 내부에서만 쓰는 캐시 (직렬화 시 숨겨짐)
 
     def __init__(self, **data: Any):
         super().__init__(**data)
@@ -63,9 +60,12 @@ class TrBaseModel(BaseModel):
             self._tr_id = self._tr_origin_annotation["id"]
         else:
             self.__class__._tr_counter += 1
-            self._tr_id = f"{get_model_name(self)}@{get_module_name(self)}:{get_origin_name()}:{self.__class__._tr_counter}"
+            self._tr_id = (
+                f"{get_model_name(self)}@{get_module_name(self)}"
+                f":{get_origin_name()}:{self.__class__._tr_counter}"
+            )
 
-    def __init_subclass__(cls, **kwargs):  # pyright: ignore[reportMissingParameterType]
+    def __init_subclass__(cls, **kwargs: Any):
         super().__init_subclass__(**kwargs)
         # 새로운 하위 클래스가 생성될 때마다 해당 클래스만의 카운터를 0으로 초기화합니다.
         cls._tr_counter = 0
@@ -115,9 +115,7 @@ class TrBaseModel(BaseModel):
             exclude_set = {"tr_annotation"}
 
         content = json.dumps(
-            self.model_dump(
-                mode="json", exclude_none=True, include=include, exclude=exclude_set
-            ),
+            self.model_dump(mode="json", exclude_none=True, include=include, exclude=exclude_set),
             sort_keys=True,
             ensure_ascii=False,
         )
@@ -141,7 +139,7 @@ class TrBaseModel(BaseModel):
     def tr_annotation(self) -> TrAnnotation:
         return self.get_tr_annotation()
 
-    def __setattr__(self, key: str, value: Any):
+    def __setattr__(self, key: str, value: Any) -> None:
         """값 변경 시 캐시 무효화"""
         if key == "_tr_cached_id":
             object.__setattr__(self, key, value)
@@ -158,30 +156,36 @@ class DataDump(TypedDict):
 
 # ===== Helper Functions =====
 
+
 def get_model_inst_id(data: TrBaseModel | DataDump) -> str:
     if isinstance(data, TrBaseModel):
         return data._tr_id  # type: ignore
     return data["tr_annotation"]["id"]
+
 
 def get_model_type(data: TrBaseModel | type[TrBaseModel] | DataDump) -> str:
     if isinstance(data, dict):
         return data["tr_annotation"]["model_type"]
     return data._tr_model_type  # type: ignore
 
+
 def get_model_id(data: TrBaseModel | type[TrBaseModel] | DataDump) -> str:
     if isinstance(data, dict):
         return data["tr_annotation"]["model_id"]
     return data._tr_model_id  # type: ignore
+
 
 def get_module_name(data: TrBaseModel | DataDump) -> str:
     if isinstance(data, TrBaseModel):
         return re.split(r"[@:]", get_model_id(data))[1]
     return data["tr_annotation"]["module_name"]
 
+
 def get_model_name(data: TrBaseModel | DataDump) -> str:
     if isinstance(data, TrBaseModel):
         return re.split(r"[@:]", get_model_id(data))[0]
     return data["tr_annotation"]["model_name"]
+
 
 def get_model_generated_origin(data: TrBaseModel | DataDump) -> str:
     if isinstance(data, TrBaseModel):
@@ -189,45 +193,73 @@ def get_model_generated_origin(data: TrBaseModel | DataDump) -> str:
     return data["tr_annotation"]["generated_origin"]
 
 
-Treq = TypeVar("Treq", bound="RequestModel")
-Treq2 = TypeVar("Treq2", bound="RequestModel")
-Tget = TypeVar("Tget", bound="DataModel")
-Tput = TypeVar("Tput", bound="DataModel")
+# Treq = TypeVar("Treq", bound="RequestModel")
+# Treq2 = TypeVar("Treq2", bound="RequestModel")
+# Tget = TypeVar("Tget", bound="DataModel")
+# Tput = TypeVar("Tput", bound="DataModel")
 
 
 class Runnable(Protocol):
     async def invoke(self, input: DataModel) -> DataModel | None: ...
 
 
-class Sequence(Generic[Treq]):
+class Sequence[Treq: RequestModel]:
     def __init__(self, pre: Sequence[Treq], *steps: Runnable):
-        self._req  = pre.req_model
+        self._req = pre.require
         self._symbol = pre.symbol
         self._steps = steps
-        self.queue: Queue[DataModel] | None = None
+        # self._joins: set[Sequence[RequestModel]] = set()
 
     def __or__(self, other: Runnable) -> Sequence[Treq]:
         return Sequence(self, *self._steps, other)
 
     @property
-    def req_model(self) -> Treq:
+    def require(self) -> Treq:
         return self._req
-    
+
     @property
     def symbol(self) -> str:
         return self._symbol
 
+    async def invoke(self, input: DataModel) -> DataModel | None:
+        data = input
+        for step in self._steps:
+            data = await step.invoke(data)
+            if not data:
+                return
+        return data
+        # if not self._joins:
+        #     raise SequenceError("'Join'할게 없으면 아웃풋 데이터는 'None'이어야 한다.")
+        # joins = list(self._joins)
+        # results: list[None | BaseException] = await gather(
+        #     *[s.invoke(data) for s in joins], return_exceptions=True
+        # )
+        # errors: list[Exception] = []
+        # removing: set[Sequence[RequestModel]] = set()
+        # for i, error in enumerate(results):
+        #     if isinstance(error, ExceptionGroup):
+        #         # group = cast(ExceptionGroup[Exception], error)
+        #         errors.extend(error.exceptions)
+        #     elif isinstance(error, Exception):
+        #         errors.append(error)
+        #     removing.add(joins[i])
+        # self._joins -= removing
+        # if not self._joins:
+        #     errors.append(SequenceError("더이상 'Join'할게 없다."))
+        # if errors:
+        #     raise ExceptionGroup("Sequence Error!!", errors)
 
-class RequestSequence(Sequence[Treq]):
-    def __init__(self, req: Treq, symbol: str):
-        self._req = req
+
+class RequireSequence[Treq: RequestModel](Sequence):
+    def __init__(self, require: Treq, symbol: str):
+        self._req = require
         self._symbol = symbol
         self._steps = ()
-        self.queue: Queue[DataModel] | None = None
+        # self._joins: set[Sequence[RequestModel]] = set()
 
 
 class RequestModel(TrBaseModel):
-    _tr_model_type: ClassVar[str] = "request"
+    _tr_model_type: ClassVar[str] = "unregistered"
     # _tr_request_list: ClassVar[list[Callable[[Self], RequestModel]]] = []
 
     def __init_subclass__(cls, **kwargs: Any):
@@ -235,22 +267,61 @@ class RequestModel(TrBaseModel):
         cls._tr_require_cb: tuple[str, Callable[[Self], RequestModel]] | None = None
 
     @classmethod
-    def require(cls, t_model: type[Treq]):
+    def require[Treq: RequestModel](cls, t_model: type[Treq]):
         def wraper(cb: Callable[[Self], Treq]):
             cls._tr_require_cb = (t_model._tr_model_id, cb)
+
         return wraper
 
     @property
     def tr_require(self) -> RequestModel | None:
         if not self._tr_require_cb:
             return None
-        else:
-            return self._tr_require_cb[1](self)
+        return self._tr_require_cb[1](self)
 
     def __call__(self, symbol: str) -> Sequence[Self]:
-        return RequestSequence(self, symbol)
+        return RequireSequence(self, symbol)
 
 
 class DataModel(TrBaseModel):
     _tr_model_type: ClassVar[str] = "data"
     symbol: str = ""
+
+
+class ClosedConnection(Exception): ...
+
+
+# TODO: close 되었다면 ClosedConnection 예외를 발생해야 한다.
+# type Sender = Callable[[DataModel], Coroutine[Any, Any, None]]
+class Sender(Protocol):
+    async def __call__(self, data: DataModel) -> None: ...
+
+
+# type Receiver = Callable[[], Coroutine[Any, Any, DataModel]]
+class Receiver(Protocol):
+    async def __call__(self) -> DataModel: ...
+
+
+# class Transmitter(Protocol):
+#     async def send(self, data: DataModel) -> None: ...
+#     async def _(self, aa: Callable[[DataModel], Coroutine[Any, Any, None]])
+
+
+# class Symbol(Runnable):
+#     def __init__(self, name: str) -> None:
+#         self._name = name
+#         self._ts_set: set[Sender] = set()
+
+#     def __str__(self) -> str:
+#         return self._name
+
+#     def __repr__(self) -> str:
+#         return f"Symbol({self._name!r})"
+
+#     # TODO:
+#     async def invoke(self, input: DataModel) -> DataModel | None:
+#         if not self._ts_set:
+#             raise ClosedConnection("Closed Transmitter")
+
+#     # TODO
+#     def add_trasmitter(self, ts: Sender): ...
