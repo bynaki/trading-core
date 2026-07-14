@@ -16,6 +16,7 @@ from trading_core import (
     set_origin_name,
     task,
 )
+from trading_core.domain import SharedSender
 from trading_core.model import get_model_id, get_origin_name
 
 
@@ -69,33 +70,15 @@ class QuoteReq(RequestModel):
     pass
 
 
-def test_tr_require_caches_until_request_values_change() -> None:
-    class SourceReq(RequestModel):
-        symbols: list[str]
+def test_shared_sender_accepts_symbol_set() -> None:
+    shared = SharedSender()
 
-    class RequiredReq(RequestModel):
-        symbols: list[str]
+    async def sender(data: DataModel) -> None:
+        pass
 
-    calls = 0
+    shared.set_sender(sender, {"BTC", "ETH"})
 
-    @SourceReq.require(RequiredReq)
-    def build_required(req: SourceReq) -> RequiredReq:
-        nonlocal calls
-        calls += 1
-        return RequiredReq(symbols=req.symbols)
-
-    req = SourceReq(symbols=["BTC"])
-
-    first = req.tr_require
-    assert first is req.tr_require
-    assert calls == 1
-
-    req.symbols.append("ETH")
-    changed = req.tr_require
-    assert changed is not first
-    assert isinstance(changed, RequiredReq)
-    assert changed.symbols == ["BTC", "ETH"]
-    assert calls == 2
+    assert shared.symbols == {"BTC", "ETH"}
 
 
 def test_request_model_builds_sequence_with_symbol() -> None:

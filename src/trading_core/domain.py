@@ -184,14 +184,14 @@ class TransmitQueue(Sender):
 
 class SharedSender:
     def __init__(self):
-        self._senders: set[tuple[Sender, set[str]]] = set()
+        self._senders: set[tuple[Sender, frozenset[str]]] = set()
 
     def set_sender(self, sender: Sender, symbols: set[str]):
         for st in self._senders:
             if st[0] == sender:
                 self._senders.remove(st)
                 break
-        self._senders.add((sender, symbols))
+        self._senders.add((sender, frozenset(symbols)))
 
     @property
     def symbols(self):
