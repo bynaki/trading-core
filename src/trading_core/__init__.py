@@ -14,8 +14,6 @@ from trading_core.domain import (
     ClosedConnection,
     Domain,
     DomainError,
-    Edge,
-    Segment,
     Stage,
     TransmitQueue,
 )
@@ -42,8 +40,6 @@ __all__ = [
     "DefineError",
     "Domain",
     "DomainError",
-    "Edge",
-    "Segment",
     "Stage",
     "ProcessorDefiner",
     "ModelError",

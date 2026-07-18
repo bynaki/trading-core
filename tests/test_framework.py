@@ -4,14 +4,21 @@
 실행되므로, `async def` 테스트 함수에 별도 마커를 붙이지 않아도 된다.
 """
 
+from typing import Any
+
 import pytest
 
 from trading_core import (
+    ClosedConnection,
     DataModel,
     DefineError,
+    Domain,
     ModelError,
     RequestModel,
     Sequence,
+    Stage,
+    TransmitQueue,
+    generator,
     processor,
     set_origin_name,
     task,
@@ -70,6 +77,21 @@ class QuoteReq(RequestModel):
     pass
 
 
+def test_stage_can_only_be_created_by_domain() -> None:
+    async def sender(data: DataModel) -> None:
+        pass
+
+    create_stage: Any = Stage
+
+    with pytest.raises(TypeError, match="Domain"):
+        create_stage(
+            object(),
+            id="stage:1",
+            request=QuoteReq(),
+            output=sender,
+        )
+
+
 def test_shared_sender_accepts_symbol_set() -> None:
     shared = SharedSender()
 
@@ -79,6 +101,54 @@ def test_shared_sender_accepts_symbol_set() -> None:
     shared.set_sender(sender, {"BTC", "ETH"})
 
     assert shared.symbols == {"BTC", "ETH"}
+
+    shared.set_sender(sender, set())
+
+    assert shared.symbols == set()
+
+
+async def test_transmit_queue_raises_closed_connection_after_close() -> None:
+    queue = TransmitQueue()
+    await queue.close()
+
+    with pytest.raises(ClosedConnection):
+        await queue.send(Ping())
+    with pytest.raises(ClosedConnection):
+        await queue.recv()
+
+
+async def test_origin_stage_with_no_symbols_is_removed_and_closed() -> None:
+    class EmptyReq(RequestModel):
+        pass
+
+    class Context:
+        closed = False
+
+    context = Context()
+
+    @generator(EmptyReq)
+    def source(req: EmptyReq) -> Context:
+        return context
+
+    @source.bind
+    async def bind(ctx: Context, symbols: set[str], recv: Any):
+        yield Ping()
+
+    @source.close
+    async def close(ctx: Context) -> None:
+        ctx.closed = True
+
+    async def sender(data: DataModel) -> None:
+        pass
+
+    req = EmptyReq()
+    domain = Domain()
+    async with domain.stage(req, sender) as stage:
+        await stage.update(set())
+
+    content_id = req.get_tr_content_id(exclude={"symbols"})
+    assert domain.get_origin_stage(content_id) is None
+    assert context.closed
 
 
 def test_request_model_builds_sequence_with_symbol() -> None:
