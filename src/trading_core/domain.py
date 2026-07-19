@@ -18,30 +18,6 @@ from .model import (
 class ClosedConnection(Exception): ...
 
 
-# class Segment:
-#     def __init__(self, req: RequestModel, symbols: set[str]):
-#         self._req = req
-#         self._symbols = symbols
-
-#     @property
-#     def request(self) -> RequestModel:
-#         return self._req
-
-#     @property
-#     def symbols(self) -> set[str]:
-#         return self._symbols
-
-
-# class Edge(Runnable):
-#     def __init__(self): ...
-
-#     async def invoke(self, input: DataModel) -> None: ...
-
-#     def add_segment(self, req: RequestModel, symbols: set[str]): ...
-
-#     def get_segment_set(self) -> set[Segment]: ...
-
-
 class TransmitQueue(Sender):
     def __init__(self):
         self._q = Queue[DataModel]()
@@ -70,7 +46,7 @@ class TransmitQueue(Sender):
         return self._closed
 
 
-class SharedSender:
+class SharedSender(Sender):
     def __init__(self):
         self._senders: set[tuple[Sender, frozenset[str]]] = set()
 
@@ -90,10 +66,22 @@ class SharedSender:
         return syms
 
     async def __call__(self, data: DataModel) -> None:
+        sent = False
         async with TaskGroup() as tg:
             for st in self._senders:
                 if data.symbol in st[1]:
                     tg.create_task(st[0](data))
+                    sent = True
+        if not sent:
+            print("warning: 데이터을 전송할 'Sender'가 없다.")
+
+    async def close(self) -> None:
+        try:
+            async with TaskGroup() as tg:
+                for st in self._senders:
+                    tg.create_task(st[0].close())
+        finally:
+            self._senders.clear()
 
 
 class _StageCreationKey:
@@ -243,6 +231,7 @@ class Domain:
             async def _(gen: AsyncGenerator[DataModel]):
                 async for data in gen:
                     await shared_sender(data)
+                await shared_sender.close()
 
             await self._submit(_(gen), id)
 
@@ -275,8 +264,11 @@ class Domain:
         q = TransmitQueue()
         async with self.stage(req, q) as stage:
             await stage.update(symbols)
-            while True:
-                yield await q.recv()
+            try:
+                while True:
+                    yield await q.recv()
+            except ClosedConnection:
+                ...
 
     async def start(self):
         return await self._tmg.start()
@@ -310,10 +302,3 @@ class Domain:
         if definer is None:
             raise DomainError(f"요청한 'RequestModel'의 'Definer'를 찾을 수 없다. - {model_id}")
         return definer
-
-
-async def main():
-    domain = Domain()
-    async with domain.request(RequestModel(), {"B"}) as gen:
-        async for data in gen:
-            print(data)

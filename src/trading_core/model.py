@@ -288,13 +288,11 @@ class DataModel(TrBaseModel):
     symbol: str = ""
 
 
-class ClosedConnection(Exception): ...
-
-
-# TODO: close 되었다면 ClosedConnection 예외를 발생해야 한다.
+# close 되었다면 ClosedConnection 예외를 발생해야 한다.
 # type Sender = Callable[[DataModel], Coroutine[Any, Any, None]]
 class Sender(Protocol):
     async def __call__(self, data: DataModel) -> None: ...
+    async def close(self) -> None: ...
 
 
 # type Receiver = Callable[[], Coroutine[Any, Any, DataModel]]
@@ -302,26 +300,4 @@ class Receiver(Protocol):
     async def __call__(self) -> DataModel: ...
 
 
-# class Transmitter(Protocol):
-#     async def send(self, data: DataModel) -> None: ...
-#     async def _(self, aa: Callable[[DataModel], Coroutine[Any, Any, None]])
-
-
-# class Symbol(Runnable):
-#     def __init__(self, name: str) -> None:
-#         self._name = name
-#         self._ts_set: set[Sender] = set()
-
-#     def __str__(self) -> str:
-#         return self._name
-
-#     def __repr__(self) -> str:
-#         return f"Symbol({self._name!r})"
-
-#     # TODO:
-#     async def invoke(self, input: DataModel) -> DataModel | None:
-#         if not self._ts_set:
-#             raise ClosedConnection("Closed Transmitter")
-
-#     # TODO
-#     def add_trasmitter(self, ts: Sender): ...
+#     async def close(self) -> None: ...

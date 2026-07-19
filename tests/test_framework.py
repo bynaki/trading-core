@@ -35,6 +35,20 @@ class Pong(DataModel):
     msg: str = ""
 
 
+class RecordingSender:
+    """Sender 프로토콜을 구현하는 테스트용 출력 수집기."""
+
+    def __init__(self) -> None:
+        self.received: list[DataModel] = []
+        self.closed = False
+
+    async def __call__(self, data: DataModel) -> None:
+        self.received.append(data)
+
+    async def close(self) -> None:
+        self.closed = True
+
+
 def test_datamodel_carries_tr_annotation() -> None:
     """DataModel 인스턴스는 생성 시 자기 출처(annotation)를 들고 다닌다.
 
@@ -78,9 +92,6 @@ class QuoteReq(RequestModel):
 
 
 def test_stage_can_only_be_created_by_domain() -> None:
-    async def sender(data: DataModel) -> None:
-        pass
-
     create_stage: Any = Stage
 
     with pytest.raises(TypeError, match="Domain"):
@@ -88,15 +99,13 @@ def test_stage_can_only_be_created_by_domain() -> None:
             object(),
             id="stage:1",
             request=QuoteReq(),
-            output=sender,
+            output=RecordingSender(),
         )
 
 
 def test_shared_sender_accepts_symbol_set() -> None:
     shared = SharedSender()
-
-    async def sender(data: DataModel) -> None:
-        pass
+    sender = RecordingSender()
 
     shared.set_sender(sender, {"BTC", "ETH"})
 
@@ -104,6 +113,20 @@ def test_shared_sender_accepts_symbol_set() -> None:
 
     shared.set_sender(sender, set())
 
+    assert shared.symbols == set()
+
+
+async def test_shared_sender_routes_data_and_closes_senders() -> None:
+    shared = SharedSender()
+    sender = RecordingSender()
+    shared.set_sender(sender, {"BTC"})
+
+    data = Ping(symbol="BTC", msg="hello")
+    await shared(data)
+    await shared.close()
+
+    assert sender.received == [data]
+    assert sender.closed
     assert shared.symbols == set()
 
 
@@ -141,18 +164,15 @@ async def test_origin_stage_with_no_symbols_is_removed_and_closed() -> None:
     async def close(ctx: Context) -> None:
         ctx.closed = True
 
-    async def sender(data: DataModel) -> None:
-        pass
-
     req = EmptyReq()
     domain = Domain()
-    async with domain.stage(req, sender) as stage:
+    async with domain.stage(req, RecordingSender()) as stage:
         await stage.update(set())
 
     assert len(contexts) == 1
     assert contexts[0].closed
 
-    async with domain.stage(req, sender) as stage:
+    async with domain.stage(req, RecordingSender()) as stage:
         await stage.update(set())
 
     assert len(contexts) == 2
