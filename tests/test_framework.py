@@ -122,12 +122,15 @@ async def test_origin_stage_with_no_symbols_is_removed_and_closed() -> None:
         pass
 
     class Context:
-        closed = False
+        def __init__(self) -> None:
+            self.closed = False
 
-    context = Context()
+    contexts: list[Context] = []
 
     @generator(EmptyReq)
     def source(req: EmptyReq) -> Context:
+        context = Context()
+        contexts.append(context)
         return context
 
     @source.bind
@@ -146,9 +149,14 @@ async def test_origin_stage_with_no_symbols_is_removed_and_closed() -> None:
     async with domain.stage(req, sender) as stage:
         await stage.update(set())
 
-    content_id = req.get_tr_content_id(exclude={"symbols"})
-    assert domain.get_origin_stage(content_id) is None
-    assert context.closed
+    assert len(contexts) == 1
+    assert contexts[0].closed
+
+    async with domain.stage(req, sender) as stage:
+        await stage.update(set())
+
+    assert len(contexts) == 2
+    assert contexts[1].closed
 
 
 def test_request_model_builds_sequence_with_symbol() -> None:

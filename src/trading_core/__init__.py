@@ -20,8 +20,10 @@ from trading_core.domain import (
 from trading_core.model import (
     DataModel,
     ModelError,
+    Receiver,
     RequestModel,
     Runnable,
+    Sender,
     Sequence,
     get_model_generated_origin,
     get_model_id,
@@ -59,4 +61,6 @@ __all__ = [
     "generator",
     "set_origin_name",
     "task",
+    "Receiver",
+    "Sender",
 ]

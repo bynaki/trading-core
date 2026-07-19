@@ -176,9 +176,6 @@ class Domain:
         self._origin_stage_dict: dict[str, OriginGenStage] = {}
         self._count = 0
 
-    def get_origin_stage(self, content_id: str):
-        return self._origin_stage_dict.get(content_id)
-
     @asynccontextmanager
     async def stage(self, req: RequestModel, output: Sender):
         if get_model_type(req) == "generator":
@@ -296,7 +293,13 @@ class Domain:
     async def _cancel_by_name(self, name: str) -> bool:
         return await self._tmg.cancel_by_name(name)
 
-    async def _close_stage(self, stage: Stage[Sender]): ...
+    async def _close_stage(self, stage: Stage[Sender]):
+        content_id = stage.req_model.get_tr_content_id(exclude={"symbols"})
+        origin = self._origin_stage_dict.get(content_id)
+        if origin:
+            shared_sender = origin.output
+            shared_sender.set_sender(stage.output, set())
+            await origin.update(shared_sender.symbols)
 
     def _generate_id(self, req: RequestModel):
         self._count += 1

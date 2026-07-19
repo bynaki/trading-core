@@ -5,6 +5,8 @@ build/
 dist/
 wheels/
 *.egg-info
+nvim.log
 
 # Virtual environments
 .venv
+

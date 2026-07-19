@@ -5,13 +5,9 @@ description = "Market-agnostic trading strategy & indicator library"
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
-authors = [
-    { name = "bynaki", email = "bynaki@icloud.com" }
-]
+authors = [{ name = "bynaki", email = "bynaki@icloud.com" }]
 requires-python = ">=3.14"
-dependencies = [
-    "pydantic>=2.13.4",
-]
+dependencies = ["pydantic>=2.13.4"]
 
 [build-system]
 requires = ["uv_build>=0.10.6,<0.11.0"]
@@ -27,7 +23,7 @@ select = ["E", "F", "I", "UP", "B"]
 [tool.pyright]
 pythonVersion = "3.14"
 typeCheckingMode = "standard"
-include = ["src", "tests"]
+include = ["src", "tests", "examples"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -35,8 +31,8 @@ asyncio_mode = "auto"
 
 [dependency-groups]
 dev = [
-    "pyright>=1.1.411",
-    "pytest>=9.1.1",
-    "pytest-asyncio>=1.4.0",
-    "ruff>=0.15.18",
+  "pyright>=1.1.411",
+  "pytest>=9.1.1",
+  "pytest-asyncio>=1.4.0",
+  "ruff>=0.15.18",
 ]
