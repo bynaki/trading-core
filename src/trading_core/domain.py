@@ -26,7 +26,7 @@ class TransmitQueue(Sender):
         try:
             return await self._q.put(data)
         except QueueShutDown as exc:
-            raise ClosedConnection("'TransmitQueue'가 이미 닫혔다.") from exc
+            raise ClosedConnection("'TransmitQueue'가 이미 닫혔다. - send()") from exc
 
     async def __call__(self, data: DataModel) -> None:
         return await self.send(data)
@@ -35,7 +35,7 @@ class TransmitQueue(Sender):
         try:
             return await self._q.get()
         except QueueShutDown as exc:
-            raise ClosedConnection("'TransmitQueue'가 이미 닫혔다.") from exc
+            raise ClosedConnection("'TransmitQueue'가 이미 닫혔다. - recv()") from exc
 
     async def close(self) -> None:
         self._q.shutdown()

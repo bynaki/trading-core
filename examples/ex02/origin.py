@@ -51,31 +51,32 @@ class NamingAllData(DataModel):
     flower: str
     dog: str
     cat: str
+    count: int
 
 
-class NamingContext(TypedDict):
+class NamingAllContext(TypedDict):
     req: NamingAllReq
 
 
 @generator(NamingAllReq)
-def naming(req: NamingAllReq) -> NamingContext:
-    return NamingContext(req=req)
+def naming(req: NamingAllReq) -> NamingAllContext:
+    return NamingAllContext(req=req)
 
 
 @naming.bind
-async def _(ctx: NamingContext, symbols: set[str], recv: Receiver | None):
+async def _(ctx: NamingAllContext, symbols: set[str], recv: Receiver | None):
     req = ctx["req"]
     symbol_list = list(symbols)
     symbol_list.sort()
     for i in range(req.count):
         symbol = symbol_list[i % len(symbol_list)]
-        flower = f"{flower_names[i]}:{symbol}"
-        dog = f"{dog_names[i]}:{symbol}"
-        cat = f"{cat_names[i]}:{symbol}"
-        yield NamingAllData(flower=flower, dog=dog, cat=cat, symbol=symbol)
+        flower = f"{flower_names[i % len(flower_names)]}:{symbol}"
+        dog = f"{dog_names[i % len(dog_names)]}:{symbol}"
+        cat = f"{cat_names[i % len(cat_names)]}:{symbol}"
+        yield NamingAllData(flower=flower, dog=dog, cat=cat, count=i + 1, symbol=symbol)
         await sleep(1)
 
 
 @naming.close
-async def _(ctx: NamingContext):
+async def _(ctx: NamingAllContext):
     print("Closed NamingAllReq")

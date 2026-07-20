@@ -1,5 +1,5 @@
-from asyncio import Task, create_task, gather, run
-from typing import Any
+from asyncio import Task, TaskGroup, create_task, gather, run
+from typing import Any, Literal
 
 import ex01
 import ex02
@@ -17,10 +17,18 @@ async def run_ex01(domain: Domain):
 
 
 async def run_ex02(domain: Domain):
-    req02 = ex02.NamingAllReq(count=10)
-    async with domain.request(req02, {"BTC", "USDT", "ETH", "XRP"}) as gen:
-        async for data in gen:
-            print(data.model_dump_json(indent=2))
+    symbols = {"SYMBOL_A", "SYMBOL_B", "SYMBOL_C", "SYMBOL_D", "SYMBOL_E"}
+
+    async def request(kind: Literal["flower", "dog", "cat"]):
+        req_flower = ex02.NamingReq(kind=kind, count=10)
+        async with domain.request(req_flower, symbols) as gen:
+            async for data in gen:
+                print(data.model_dump_json(indent=2))
+
+    async with TaskGroup() as tg:
+        tg.create_task(request("flower"))
+        tg.create_task(request("dog"))
+        tg.create_task(request("cat"))
 
 
 async def main():

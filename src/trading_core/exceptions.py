@@ -1,3 +1,9 @@
+class ModelError(Exception): ...
+
+
+class ModelValidateError(Exception): ...
+
+
 class SequenceError(Exception): ...
 
 

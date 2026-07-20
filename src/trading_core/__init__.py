@@ -25,6 +25,7 @@ from trading_core.model import (
     Runnable,
     Sender,
     Sequence,
+    cast_model,
     get_model_generated_origin,
     get_model_id,
     get_model_inst_id,
@@ -32,6 +33,8 @@ from trading_core.model import (
     get_model_type,
     get_module_name,
     set_origin_name,
+    validate_dump,
+    validate_model,
 )
 
 __version__ = version("trading-core")
@@ -51,6 +54,7 @@ __all__ = [
     "TaskDefiner",
     "TransmitQueue",
     "__version__",
+    "cast_model",
     "get_model_generated_origin",
     "get_model_id",
     "get_model_inst_id",
@@ -61,6 +65,8 @@ __all__ = [
     "generator",
     "set_origin_name",
     "task",
+    "validate_dump",
+    "validate_model",
     "Receiver",
     "Sender",
 ]

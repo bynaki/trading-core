@@ -1,22 +1,23 @@
 import json
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
+from importlib import import_module
+from types import ModuleType
 from typing import (
     Any,
     ClassVar,
     Protocol,
     Self,
     TypedDict,
+    cast,
+    overload,
 )
 
-from pydantic import BaseModel, PrivateAttr, computed_field
+from pydantic import BaseModel, PrivateAttr, TypeAdapter, computed_field
 from pydantic.main import IncEx
 
+from .exceptions import ModelError, ModelValidateError
 from .helper import generate_digest, generate_id, verify_module
-
-
-class ModelError(Exception): ...
-
 
 _origin_name: str = ""
 
@@ -154,6 +155,9 @@ class DataDump(TypedDict):
     tr_annotation: TrAnnotation
 
 
+_tr_annotation_adapter = TypeAdapter(TrAnnotation)
+
+
 # ===== Helper Functions =====
 
 
@@ -286,6 +290,66 @@ class RequestModel(TrBaseModel):
 class DataModel(TrBaseModel):
     _tr_model_type: ClassVar[str] = "data"
     symbol: str = ""
+
+
+def validate_dump(json_data: str | bytes | Mapping[str, Any]) -> DataDump:
+    try:
+        raw: Any = dict(json_data) if isinstance(json_data, Mapping) else json.loads(json_data)
+        if isinstance(raw, str):
+            raw = json.loads(raw)
+        if not isinstance(raw, dict):
+            raise ModelValidateError()
+        raw["tr_annotation"] = _tr_annotation_adapter.validate_python(raw.get("tr_annotation"))
+        return cast(DataDump, raw)
+    except Exception as e:
+        raise ModelValidateError("validate_dump() 유효성 검사 실패") from e
+
+
+@overload
+def validate_model(data: str | bytes | DataDump, refer: None = None) -> TrBaseModel: ...
+@overload
+def validate_model(data: str | bytes | DataDump, refer: ModuleType) -> TrBaseModel: ...
+@overload
+def validate_model[T: TrBaseModel](data: str | bytes | DataDump, refer: type[T]) -> T: ...
+
+
+def validate_model[T: TrBaseModel](
+    data: str | bytes | DataDump, refer: type[T] | ModuleType | None = None
+) -> T | TrBaseModel:
+    try:
+        dump = validate_dump(data)
+        annotation = dump["tr_annotation"]
+
+        if isinstance(refer, type):
+            model_type = refer
+        else:
+            module = refer or import_module(annotation["module_name"])
+            candidate = getattr(module, annotation["model_name"], None)
+            if not isinstance(candidate, type) or not issubclass(candidate, TrBaseModel):
+                raise ModelValidateError(
+                    f"유효한 모델 클래스를 찾을 수 없습니다: "
+                    f"{module.__name__}.{annotation['model_name']}"
+                )
+            model_type = candidate
+
+        return model_type.model_validate(dump)
+    except ModelValidateError:
+        raise
+    except Exception as e:
+        raise ModelValidateError("validate_model() 유효성 검사 실패") from e
+
+
+def cast_model[T: TrBaseModel](data: TrBaseModel, cast_t: type[T]) -> T:
+    """모델 인스턴스를 복사하지 않고 검증한 타입으로 좁힌다."""
+    if not isinstance(data, TrBaseModel):
+        raise ModelValidateError("data가 TrBaseModel 인스턴스가 아닙니다")
+    if not isinstance(cast_t, type) or not issubclass(cast_t, TrBaseModel):
+        raise ModelValidateError("cast_t가 TrBaseModel 하위 클래스가 아닙니다")
+    data_model_id = get_model_id(data)
+    cast_model_id = get_model_id(cast_t)
+    if data_model_id != cast_model_id:
+        raise ModelValidateError(f"모델 ID가 일치하지 않습니다: {data_model_id} != {cast_model_id}")
+    return cast(T, data)
 
 
 # close 되었다면 ClosedConnection 예외를 발생해야 한다.
