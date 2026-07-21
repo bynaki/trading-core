@@ -1,4 +1,4 @@
-from asyncio import Queue, QueueShutDown, TaskGroup
+from asyncio import Lock, Queue, QueueShutDown, TaskGroup
 from collections.abc import AsyncGenerator, Coroutine
 from contextlib import aclosing, asynccontextmanager
 from typing import Any, TypedDict, Unpack
@@ -179,7 +179,12 @@ class Domain:
     async def _ensure_require_stage(
         self, req: RequestModel, transq: TransmitQueue, symbols: set[str]
     ):
-        stage: OriginGenStage = self._define_origin_gen_stage(req)
+        content_id = req.get_tr_content_id()
+        stage = self._origin_stage_dict.get(content_id)
+        if stage is None:
+            if not symbols:
+                return
+            stage = self._define_origin_gen_stage(req)
         output = stage.output
         output.set_sender(transq, symbols)
         await stage.update(output.symbols)
@@ -203,37 +208,56 @@ class Domain:
         )
         gen: AsyncGenerator[DataModel] | None = None
         transq = TransmitQueue()
+        update_lock = Lock()
+        active_symbols: frozenset[str] | None = None
+        completed = False
 
         async def update(symbols: set[str]):
-            nonlocal gen
-            if gen:
-                await gen.aclose()
-            require = req.tr_require
-            # 업데이트 심볼이 없다면 자원 정리한다.
-            if not symbols:
+            nonlocal active_symbols, gen
+            async with update_lock:
+                current_symbols = frozenset(shared_sender.symbols)
+                if current_symbols == active_symbols:
+                    return
+                print(f"update({set(current_symbols)} - {id})")
+                if gen and not completed:
+                    await self._cancel_by_name(id)
+                    await gen.aclose()
+                    gen = None
+                require = req.tr_require
+                # 업데이트 심볼이 없다면 자원 정리한다.
+                if not current_symbols:
+                    if require:
+                        await self._ensure_require_stage(require, transq, set())
+                    self._origin_stage_dict.pop(content_id, None)
+                    closer = definer.get_closer(ctx)
+                    if closer:
+                        await closer()
+                    active_symbols = current_symbols
+                    return
+                if completed:
+                    active_symbols = current_symbols
+                    return
+                #
+                symbol_set = set(current_symbols)
                 if require:
-                    await self._ensure_require_stage(require, transq, symbols)
-                del self._origin_stage_dict[content_id]
-                closer = definer.get_closer(ctx)
-                if closer:
-                    await closer()
-                return
-            #
-            if require:
-                await self._ensure_require_stage(require, transq, symbols)
-                bind = definer.get_binder(ctx, symbols, transq.recv)
-            else:
-                bind = definer.get_binder(ctx, symbols, None)
-            if bind is None:
-                raise StageError("'bind'되지 않았다.")
-            gen = bind()
+                    await self._ensure_require_stage(require, transq, symbol_set)
+                    bind = definer.get_binder(ctx, symbol_set, transq.recv)
+                else:
+                    bind = definer.get_binder(ctx, symbol_set, None)
+                if bind is None:
+                    raise StageError("'bind'되지 않았다.")
+                gen = bind()
 
-            async def _(gen: AsyncGenerator[DataModel]):
-                async for data in gen:
-                    await shared_sender(data)
-                await shared_sender.close()
+                async def _(gen: AsyncGenerator[DataModel]):
+                    nonlocal completed
+                    async for data in gen:
+                        await shared_sender(data)
+                    completed = True
+                    await shared_sender.close()
 
-            await self._submit(_(gen), id)
+                print(f"submit({id}) && content_id: {content_id}")
+                await self._submit(_(gen), id)
+                active_symbols = current_symbols
 
         stage.update = update
         self._origin_stage_dict[content_id] = stage

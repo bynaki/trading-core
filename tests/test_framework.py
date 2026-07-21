@@ -4,6 +4,7 @@
 실행되므로, `async def` 테스트 함수에 별도 마커를 붙이지 않아도 된다.
 """
 
+from asyncio import Event, Queue, sleep, wait_for
 from typing import Any
 
 import pytest
@@ -24,6 +25,7 @@ from trading_core import (
     task,
 )
 from trading_core.domain import SharedSender
+from trading_core.helper import TaskManager
 from trading_core.model import get_model_id, get_origin_name
 
 
@@ -177,6 +179,125 @@ async def test_origin_stage_with_no_symbols_is_removed_and_closed() -> None:
 
     assert len(contexts) == 2
     assert contexts[1].closed
+
+
+async def test_missing_required_stage_is_not_created_for_empty_symbols() -> None:
+    class RequiredReq(RequestModel):
+        pass
+
+    contexts: list[object] = []
+
+    @generator(RequiredReq)
+    def source(req: RequiredReq) -> object:
+        context = object()
+        contexts.append(context)
+        return context
+
+    domain = Domain()
+    await domain._ensure_require_stage(RequiredReq(), TransmitQueue(), set())
+
+    assert contexts == []
+
+
+async def test_shared_origin_restarts_only_when_symbol_union_changes() -> None:
+    class SharedReq(RequestModel):
+        pass
+
+    started = Queue[frozenset[str]]()
+
+    @generator(SharedReq)
+    def source(req: SharedReq) -> object:
+        return object()
+
+    @source.bind
+    async def bind(ctx: object, symbols: set[str], recv: Any):
+        started.put_nowait(frozenset(symbols))
+        await Event().wait()
+        yield Ping()
+
+    domain = Domain()
+    await domain.start()
+
+    try:
+        async with domain.stage(SharedReq(), RecordingSender()) as first:
+            await first.update({"BTC"})
+            assert await wait_for(started.get(), 1) == frozenset({"BTC"})
+
+            async with domain.stage(SharedReq(), RecordingSender()) as second:
+                await second.update({"BTC"})
+                await sleep(0)
+                assert started.empty()
+
+                await second.update({"ETH"})
+                assert await wait_for(started.get(), 1) == frozenset({"BTC", "ETH"})
+
+            assert await wait_for(started.get(), 1) == frozenset({"BTC"})
+    finally:
+        await domain.stop()
+
+
+async def test_completed_origin_does_not_restart_while_subscribers_detach() -> None:
+    class FiniteReq(RequestModel):
+        pass
+
+    started = Queue[frozenset[str]]()
+    ready = Event()
+    release_close = Event()
+    close_started = Queue[None]()
+
+    class BlockingSender(RecordingSender):
+        async def close(self) -> None:
+            self.closed = True
+            close_started.put_nowait(None)
+            await release_close.wait()
+
+    @generator(FiniteReq)
+    def source(req: FiniteReq) -> object:
+        return object()
+
+    @source.bind
+    async def bind(ctx: object, symbols: set[str], recv: Any):
+        started.put_nowait(frozenset(symbols))
+        await ready.wait()
+        yield Ping(symbol=next(iter(symbols)))
+
+    domain = Domain()
+    await domain.start()
+
+    try:
+        async with domain.stage(FiniteReq(), BlockingSender()) as first:
+            await first.update({"BTC"})
+            assert await wait_for(started.get(), 1) == frozenset({"BTC"})
+
+            async with domain.stage(FiniteReq(), BlockingSender()) as second:
+                await second.update({"ETH"})
+                assert await wait_for(started.get(), 1) == frozenset({"BTC", "ETH"})
+                ready.set()
+                await wait_for(close_started.get(), 1)
+                await wait_for(close_started.get(), 1)
+
+            with pytest.raises(TimeoutError):
+                await wait_for(started.get(), 0.05)
+            release_close.set()
+    finally:
+        release_close.set()
+        await domain.stop()
+
+
+async def test_task_manager_cancel_pending_releases_name_before_returning() -> None:
+    async def noop() -> None:
+        pass
+
+    manager = TaskManager()
+    await manager.start()
+
+    try:
+        await manager.submit(noop(), "same-name")
+        assert await manager.cancel_by_name("same-name")
+        await manager.submit(noop(), "same-name")
+        assert await manager.cancel_by_name("same-name")
+    finally:
+        await manager.stop()
 
 
 def test_request_model_builds_sequence_with_symbol() -> None:

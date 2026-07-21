@@ -1,5 +1,4 @@
 from asyncio import sleep
-from typing import TypedDict
 
 from trading_core import DataModel, Receiver, RequestModel, generator
 
@@ -54,8 +53,22 @@ class NamingAllData(DataModel):
     count: int
 
 
-class NamingAllContext(TypedDict):
-    req: NamingAllReq
+class NamingAllContext:
+    cxt_dict: dict[str, NamingAllReq] = {}
+
+    def __init__(self, req: NamingAllReq) -> None:
+        self.content_id = req.get_tr_content_id()
+        assert not self.cxt_dict.get(req.get_tr_content_id()), (
+            "중복 'content_id' 갖은 객체는 생성할수 없다. 유일해야 한다."
+        )
+        self.cxt_dict[self.content_id] = req
+
+    @property
+    def req_model(self) -> NamingAllReq:
+        return self.cxt_dict[self.content_id]
+
+    def detach(self) -> None:
+        del self.cxt_dict[self.content_id]
 
 
 @generator(NamingAllReq)
@@ -65,7 +78,7 @@ def naming(req: NamingAllReq) -> NamingAllContext:
 
 @naming.bind
 async def _(ctx: NamingAllContext, symbols: set[str], recv: Receiver | None):
-    req = ctx["req"]
+    req = ctx.req_model
     symbol_list = list(symbols)
     symbol_list.sort()
     for i in range(req.count):
@@ -79,4 +92,5 @@ async def _(ctx: NamingAllContext, symbols: set[str], recv: Receiver | None):
 
 @naming.close
 async def _(ctx: NamingAllContext):
-    print("Closed NamingAllReq")
+    ctx.detach()
+    print("Detached NamingAllReq")

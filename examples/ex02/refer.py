@@ -1,4 +1,4 @@
-from typing import Literal, TypedDict
+from typing import Literal
 
 from trading_core import ClosedConnection, DataModel, Receiver, RequestModel, cast_model, generator
 
@@ -20,8 +20,22 @@ class NamingData(DataModel):
     count: int
 
 
-class NamingContext(TypedDict):
-    req: NamingReq
+class NamingContext:
+    cxt_dict: dict[str, NamingReq] = {}
+
+    def __init__(self, req: NamingReq) -> None:
+        self.content_id = req.get_tr_content_id()
+        assert not self.cxt_dict.get(req.get_tr_content_id()), (
+            "중복 'content_id' 갖은 객체는 생성할수 없다. 유일해야 한다."
+        )
+        self.cxt_dict[self.content_id] = req
+
+    @property
+    def req_model(self) -> NamingReq:
+        return self.cxt_dict[self.content_id]
+
+    def detach(self) -> None:
+        del self.cxt_dict[self.content_id]
 
 
 @generator(NamingReq)
@@ -38,7 +52,7 @@ async def _(ctx: NamingContext, symbols: set[str], recv: Receiver | None):
             d = cast_model(data, origin.NamingAllData)
             if d.symbol not in symbols:
                 print(f"warning: 요청한 심볼과 받은 심볼이 일치하지 않는다. - {d.symbol}")
-            req = ctx["req"]
+            req = ctx.req_model
             if req.kind == "flower":
                 yield NamingData(symbol=d.symbol, name=d.flower, count=d.count)
             elif req.kind == "dog":
@@ -53,4 +67,5 @@ async def _(ctx: NamingContext, symbols: set[str], recv: Receiver | None):
 
 @naming.close
 async def _(ctx: NamingContext):
-    print(f"Closed NamingReq - {ctx['req'].kind}")
+    print(f"Detached NamingReq - {ctx.req_model.kind}")
+    ctx.detach()

@@ -4,6 +4,7 @@ import inspect
 import os
 from asyncio import (
     CancelledError,
+    Event,
     Queue,
     Task,
     create_task,
@@ -43,6 +44,7 @@ class TaskManager:
         self._queue = Queue[tuple[Coroutine[Any, Any, None], str]]()
         self._tasks: dict[str, Task[None]] = {}  # 이름 -> 실행 중 태스크
         self._names: set[str] = set()  # 예약된(대기 + 실행) 이름 전체
+        self._release_events: dict[str, Event] = {}
         self._cancelled_pending: set[str] = set()  # 실행 전 취소된 대기 태스크 이름
         self._running = False
         self._supervisor: Task[None] | None = None
@@ -75,7 +77,8 @@ class TaskManager:
         self._stopping = False
 
     async def cancel_by_name(self, name: str) -> bool:
-        """이름으로 태스크를 찾아 안전하게 취소한다. 취소(예약)했으면 True."""
+        """이름으로 태스크를 찾아 취소하고 이름 점유가 해제될 때까지 기다린다."""
+        released = self._release_events.get(name)
         task = self._tasks.get(name)
         if task is not None:  # 실행 중
             if task is current_task():  # 자기 자신이면 취소 안 함
@@ -83,9 +86,13 @@ class TaskManager:
             task.cancel()
             # _task_wrapper가 CancelledError를 다시 raise하므로 gather로 취소 완료까지 대기
             await gather(task, return_exceptions=True)
+            if released:
+                await released.wait()
             return True
         if name in self._names:  # 아직 큐 대기 중 -> 실행 시점에 취소되도록 예약
             self._cancelled_pending.add(name)
+            if released:
+                await released.wait()
             return True
         return False  # 그런 이름 없음
 
@@ -95,6 +102,7 @@ class TaskManager:
         if name in self._names:
             raise TaskManagerError(f"이미 사용 중인 태스크 이름이다. - '{name}'")
         self._names.add(name)  # 대기 중에도 이름을 점유한다
+        self._release_events[name] = Event()
         self._submit_count += 1
         print("-" * 80)
         print(f"[TASK SUBMIT({self._submit_count})] - id: {self._id}")
@@ -120,7 +128,7 @@ class TaskManager:
                 self._tasks[name] = task
                 task.add_done_callback(lambda _t, n=name: self._release(n))
         except CancelledError:
-            print("CanceledError")
+            # print("CanceledError")
             ...
 
     async def _task_wrapper(self, coro: Coroutine[Any, Any, None], name: str):
@@ -141,6 +149,8 @@ class TaskManager:
         """완료된 태스크의 이름 점유를 해제한다."""
         self._tasks.pop(name, None)
         self._names.discard(name)
+        if released := self._release_events.pop(name, None):
+            released.set()
 
     def _skip_pending(self, coro: Coroutine[Any, Any, None], name: str):
         """실행 전에 취소된 대기 태스크를 정리한다."""
@@ -160,6 +170,9 @@ class TaskManager:
         self._tasks.clear()
         self._names.clear()
         self._cancelled_pending.clear()
+        for released in self._release_events.values():
+            released.set()
+        self._release_events.clear()
         # if curr:
         #     curr.cancel()
         #     await curr

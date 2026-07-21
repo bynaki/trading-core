@@ -1,4 +1,4 @@
-from asyncio import Task, TaskGroup, create_task, gather, run
+from asyncio import Task, TaskGroup, create_task, gather, run, sleep
 from typing import Any, Literal
 
 import ex01
@@ -17,25 +17,35 @@ async def run_ex01(domain: Domain):
 
 
 async def run_ex02(domain: Domain):
-    symbols = {"SYMBOL_A", "SYMBOL_B", "SYMBOL_C", "SYMBOL_D", "SYMBOL_E"}
+    symbols01 = {"SYMBOL_A", "SYMBOL_B", "SYMBOL_C", "SYMBOL_D", "SYMBOL_E"}
+    symbols02 = {"SYMBOL_A", "SYMBOL_B", "SYMBOL_C"}
+    symbols03 = {"SYMBOL_C", "SYMBOL_D", "SYMBOL_E"}
 
-    async def request(kind: Literal["flower", "dog", "cat"]):
-        req_flower = ex02.NamingReq(kind=kind, count=10)
-        async with domain.request(req_flower, symbols) as gen:
+    async def request(kind: Literal["flower", "dog", "cat"], symbols: set[str]):
+        req = ex02.NamingReq(kind=kind, count=10)
+        async with domain.request(req, symbols) as gen:
             async for data in gen:
                 print(data.model_dump_json(indent=2))
 
     async with TaskGroup() as tg:
-        tg.create_task(request("flower"))
-        tg.create_task(request("dog"))
-        tg.create_task(request("cat"))
+        tg.create_task(request("flower", symbols02))
+        await sleep(1)
+        tg.create_task(request("dog", symbols03))
+        await sleep(1)
+        tg.create_task(request("cat", symbols01))
+        await sleep(1)
+        tg.create_task(request("flower", symbols03))
+        await sleep(1)
+        tg.create_task(request("dog", symbols02))
+        await sleep(1)
+        tg.create_task(request("cat", symbols02))
 
 
 async def main():
     domain = Domain()
     await domain.start()
     tasks: set[Task[Any]] = set()
-    tasks.add(create_task(run_ex01(domain)))
+    # tasks.add(create_task(run_ex01(domain)))
     tasks.add(create_task(run_ex02(domain)))
     await gather(*tasks)
 
