@@ -5,6 +5,7 @@
 """
 
 from asyncio import Event, Queue, sleep, wait_for
+from inspect import CORO_CLOSED, getcoroutinestate
 from typing import Any
 
 import pytest
@@ -94,6 +95,7 @@ class QuoteReq(RequestModel):
 
 
 def test_stage_can_only_be_created_by_domain() -> None:
+    """Stage를 내부 생성 키 없이 직접 만들 수 없도록 생성 경계를 보호한다."""
     create_stage: Any = Stage
 
     with pytest.raises(TypeError, match="Domain"):
@@ -106,6 +108,7 @@ def test_stage_can_only_be_created_by_domain() -> None:
 
 
 def test_shared_sender_accepts_symbol_set() -> None:
+    """SharedSender가 송신자별 심볼을 등록하고 빈 집합으로 구독을 해제한다."""
     shared = SharedSender()
     sender = RecordingSender()
 
@@ -119,6 +122,7 @@ def test_shared_sender_accepts_symbol_set() -> None:
 
 
 async def test_shared_sender_routes_data_and_closes_senders() -> None:
+    """SharedSender가 심볼이 맞는 송신자에게 전달하고 종료 시 송신자를 닫는다."""
     shared = SharedSender()
     sender = RecordingSender()
     shared.set_sender(sender, {"BTC"})
@@ -133,6 +137,7 @@ async def test_shared_sender_routes_data_and_closes_senders() -> None:
 
 
 async def test_transmit_queue_raises_closed_connection_after_close() -> None:
+    """닫힌 TransmitQueue의 송신과 수신 모두 ClosedConnection을 발생시킨다."""
     queue = TransmitQueue()
     await queue.close()
 
@@ -143,6 +148,8 @@ async def test_transmit_queue_raises_closed_connection_after_close() -> None:
 
 
 async def test_origin_stage_with_no_symbols_is_removed_and_closed() -> None:
+    """구독 심볼이 없는 원천 스테이지는 제거되고 컨텍스트 종료 콜백을 실행한다."""
+
     class EmptyReq(RequestModel):
         pass
 
@@ -182,6 +189,8 @@ async def test_origin_stage_with_no_symbols_is_removed_and_closed() -> None:
 
 
 async def test_missing_required_stage_is_not_created_for_empty_symbols() -> None:
+    """요구 심볼이 없으면 불필요한 의존 원천 스테이지를 생성하지 않는다."""
+
     class RequiredReq(RequestModel):
         pass
 
@@ -200,6 +209,8 @@ async def test_missing_required_stage_is_not_created_for_empty_symbols() -> None
 
 
 async def test_shared_origin_restarts_only_when_symbol_union_changes() -> None:
+    """공유 원천은 전체 구독 심볼의 합집합이 달라질 때만 다시 시작한다."""
+
     class SharedReq(RequestModel):
         pass
 
@@ -237,6 +248,8 @@ async def test_shared_origin_restarts_only_when_symbol_union_changes() -> None:
 
 
 async def test_completed_origin_does_not_restart_while_subscribers_detach() -> None:
+    """완료된 유한 원천은 구독자가 빠져나가는 동안 다시 시작하지 않는다."""
+
     class FiniteReq(RequestModel):
         pass
 
@@ -285,6 +298,8 @@ async def test_completed_origin_does_not_restart_while_subscribers_detach() -> N
 
 
 async def test_task_manager_cancel_pending_releases_name_before_returning() -> None:
+    """대기 중 태스크 취소가 이름 점유를 해제하여 같은 이름을 즉시 재사용하게 한다."""
+
     async def noop() -> None:
         pass
 
@@ -296,6 +311,28 @@ async def test_task_manager_cancel_pending_releases_name_before_returning() -> N
         assert await manager.cancel_by_name("same-name")
         await manager.submit(noop(), "same-name")
         assert await manager.cancel_by_name("same-name")
+    finally:
+        await manager.stop()
+
+
+async def test_task_manager_closes_coro_cancelled_before_wrapper_starts() -> None:
+    """실행 래퍼가 시작되기 전에 취소된 코루틴도 닫혀 자원을 남기지 않는다."""
+    started = Event()
+
+    async def target() -> None:
+        started.set()
+
+    manager = TaskManager()
+    await manager.start()
+    coro = target()
+
+    try:
+        await manager.submit(coro, "cancel-before-start")
+        await sleep(0)
+
+        assert await manager.cancel_by_name("cancel-before-start")
+        assert not started.is_set()
+        assert getcoroutinestate(coro) == CORO_CLOSED
     finally:
         await manager.stop()
 

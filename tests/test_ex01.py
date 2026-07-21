@@ -50,18 +50,45 @@ async def test_count_generator_through_domain(
     assert "Must resource cleaned up - count: 10" in capsys.readouterr().out
 
 
+async def test_count_generator_rotates_across_subscribed_symbols(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """여러 심볼을 구독하면 카운트마다 심볼을 번갈아 발행하는지 확인한다."""
+
+    async def no_sleep(delay: float) -> None:
+        assert delay == 1
+
+    monkeypatch.setattr(ex01, "sleep", no_sleep)
+    domain = Domain()
+    await domain.start()
+
+    try:
+        async with domain.request(ex01.CountReq(start=6), {"BTC", "ETH"}) as stream:
+            data = [item async for item in stream]
+    finally:
+        await domain.stop()
+
+    assert [item.model_dump()["count"] for item in data] == [7, 8, 9, 10]
+    symbols = [item.symbol for item in data]
+    assert set(symbols) == {"BTC", "ETH"}
+    assert all(
+        current != following for current, following in zip(symbols, symbols[1:], strict=False)
+    )
+
+
 async def test_count_generator_cleans_up_when_closed_early(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """예제 제너레이터를 조기에 닫아도 정리 구문이 실행되는지 확인한다."""
-    request = ex01.CountReq(start=0)
-    bind = ex01.gen01.get_binder(ex01.gen01(request), {"ETH"}, None)
+    """Domain 요청을 조기에 닫아도 원천 제너레이터의 정리 구문이 실행되는지 확인한다."""
+    domain = Domain()
+    await domain.start()
 
-    assert bind is not None
-    stream = bind()
-    first = await anext(stream)
-    await stream.aclose()
+    try:
+        async with domain.request(ex01.CountReq(start=0), {"ETH"}) as stream:
+            first = await anext(stream)
+    finally:
+        await domain.stop()
 
     assert isinstance(first, ex01.CountModel)
     assert (first.symbol, first.model_dump()["count"]) == ("ETH", 1)
-    assert capsys.readouterr().out == "Must resource cleaned up - count: 1\n"
+    assert "Must resource cleaned up - count: 1" in capsys.readouterr().out

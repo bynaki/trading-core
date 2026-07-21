@@ -1,3 +1,5 @@
+"""단일 Domain에서 독립 예제와 의존 요청 예제를 동시에 실행한다."""
+
 from asyncio import Task, TaskGroup, create_task, gather, run, sleep
 from typing import Any, Literal
 
@@ -45,7 +47,7 @@ async def main():
     domain = Domain()
     await domain.start()
     tasks: set[Task[Any]] = set()
-    # tasks.add(create_task(run_ex01(domain)))
+    tasks.add(create_task(run_ex01(domain)))
     tasks.add(create_task(run_ex02(domain)))
     await gather(*tasks)
 

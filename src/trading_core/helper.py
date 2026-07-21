@@ -126,7 +126,7 @@ class TaskManager:
                     continue
                 task = create_task(self._task_wrapper(coro, name), name=name)
                 self._tasks[name] = task
-                task.add_done_callback(lambda _t, n=name: self._release(n))
+                task.add_done_callback(lambda _t, c=coro, n=name: self._release(n, c))
         except CancelledError:
             # print("CanceledError")
             ...
@@ -145,8 +145,10 @@ class TaskManager:
         finally:
             self._submit_count -= 1
 
-    def _release(self, name: str):
+    def _release(self, name: str, coro: Coroutine[Any, Any, None] | None = None):
         """완료된 태스크의 이름 점유를 해제한다."""
+        if coro is not None:
+            coro.close()
         self._tasks.pop(name, None)
         self._names.discard(name)
         if released := self._release_events.pop(name, None):

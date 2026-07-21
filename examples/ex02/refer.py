@@ -1,3 +1,21 @@
+"""공통 원천 데이터에 의존하여 요청별 결과로 변환하는 제너레이터 예제.
+
+``NamingReq.require(NamingAllReq)``는 ``NamingReq``를 처리하려면 먼저
+``NamingAllReq``의 데이터가 필요하다는 의존 관계를 선언한다. 사용자는 원천을
+직접 실행하지 않아도 되며, ``Domain``이 필요한 원천 스테이지를 만들거나 기존의
+동일한 스테이지를 재사용하여 ``Receiver``로 연결한다.
+
+binder는 수신 모델을 ``NamingAllData``로 검증한 뒤 ``kind``에 따라 flower,
+dog 또는 cat 필드만 ``NamingData``로 변환한다. 같은 kind와 count를 가진 요청은
+하나의 변환 스테이지를 공유하고, 서로 다른 종류의 변환 스테이지도 동일한
+``NamingAllReq`` 원천을 공유할 수 있다. 데이터는 심볼을 기준으로 해당 구독자에게
+전달된다.
+
+원천 큐가 닫히면 ``ClosedConnection``으로 수신 루프를 끝낸다. 마지막 구독자가
+사라지면 ``@naming.close``가 content ID로 보관한 요청을 분리하여 컨텍스트를
+정리한다.
+"""
+
 from typing import Literal
 
 from trading_core import ClosedConnection, DataModel, Receiver, RequestModel, cast_model, generator

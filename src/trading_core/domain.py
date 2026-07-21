@@ -218,7 +218,6 @@ class Domain:
                 current_symbols = frozenset(shared_sender.symbols)
                 if current_symbols == active_symbols:
                     return
-                print(f"update({set(current_symbols)} - {id})")
                 if gen and not completed:
                     await self._cancel_by_name(id)
                     await gen.aclose()
@@ -255,7 +254,6 @@ class Domain:
                     completed = True
                     await shared_sender.close()
 
-                print(f"submit({id}) && content_id: {content_id}")
                 await self._submit(_(gen), id)
                 active_symbols = current_symbols
 
