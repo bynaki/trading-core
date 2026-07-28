@@ -17,10 +17,11 @@ from asyncio import sleep
 
 from trading_core import (
     DataModel,
+    Receiver,
     RequestModel,
     generator,
+    get_model_id,
 )
-from trading_core.model import Receiver
 
 
 class CountReq(RequestModel):
@@ -29,7 +30,7 @@ class CountReq(RequestModel):
     start: int
 
 
-class CountModel(DataModel):
+class CountData(DataModel):
     """제너레이터가 구독자에게 한 건씩 내보내는 데이터 모델."""
 
     count: int
@@ -50,14 +51,18 @@ async def _(req: CountReq, symbols: set[str], recv: Receiver | None):
     """
 
     sym_list = list(symbols)
-    count = req.start
+    start = req.start
+    count = start
     try:
-        while True:
-            count += 1
+        while count:
             remainder = count % len(sym_list)
-            yield CountModel(symbol=sym_list[remainder], count=count)
+            yield CountData(symbol=sym_list[remainder], count=count)
+            count += 1
             await sleep(1)
-            if count == 10:
-                break
     finally:
         print(f"Must resource cleaned up - count: {count}")
+
+
+@gen01.close
+async def _(req: CountReq):
+    print(f"Closed - {get_model_id(req)}")

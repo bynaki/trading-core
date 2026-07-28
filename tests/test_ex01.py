@@ -1,53 +1,43 @@
 """카운트 제너레이터 예제 테스트."""
 
-import sys
-from pathlib import Path
-
 import pytest
 
+from examples import ex01
+from examples.ex01 import ex01 as ex01_module
 from trading_core import Domain
 
 
-def _load_example():
-    project_root = str(Path(__file__).parents[1])
-    sys.path.insert(0, project_root)
-    try:
-        from examples import ex01
-    finally:
-        sys.path.remove(project_root)
-    return ex01
+def test_package_exports_example_api() -> None:
+    """패키지에서 예제 모델과 실행 함수를 직접 가져올 수 있는지 확인한다."""
 
-
-ex01 = _load_example()
+    assert ex01.CountReq is ex01_module.CountReq
+    assert ex01.CountData is ex01_module.CountData
+    assert callable(ex01.run_ex)
 
 
 async def test_count_generator_through_domain(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """예제의 Domain 요청 흐름이 다음 카운트부터 10까지 발행하는지 확인한다."""
+    """예제의 Domain 요청 흐름이 시작값부터 카운트 10개를 발행하는지 확인한다."""
 
     async def no_sleep(delay: float) -> None:
         assert delay == 1
 
-    monkeypatch.setattr(ex01, "sleep", no_sleep)
+    monkeypatch.setattr(ex01_module, "sleep", no_sleep)
     domain = Domain()
     await domain.start()
 
     try:
         async with domain.request(ex01.CountReq(start=8), {"BTC"}) as stream:
-            data = [
-                await anext(stream),
-                await anext(stream),
-            ]
+            data = [item async for item in stream]
     finally:
         await domain.stop()
 
-    assert all(isinstance(item, ex01.CountModel) for item in data)
+    assert all(isinstance(item, ex01.CountData) for item in data)
     assert [(item.symbol, item.model_dump()["count"]) for item in data] == [
-        ("BTC", 9),
-        ("BTC", 10),
+        ("BTC", count) for count in range(8, 18)
     ]
-    assert "Must resource cleaned up - count: 10" in capsys.readouterr().out
+    assert "Must resource cleaned up - count: 17" in capsys.readouterr().out
 
 
 async def test_count_generator_rotates_across_subscribed_symbols(
@@ -58,7 +48,7 @@ async def test_count_generator_rotates_across_subscribed_symbols(
     async def no_sleep(delay: float) -> None:
         assert delay == 1
 
-    monkeypatch.setattr(ex01, "sleep", no_sleep)
+    monkeypatch.setattr(ex01_module, "sleep", no_sleep)
     domain = Domain()
     await domain.start()
 
@@ -68,7 +58,7 @@ async def test_count_generator_rotates_across_subscribed_symbols(
     finally:
         await domain.stop()
 
-    assert [item.model_dump()["count"] for item in data] == [7, 8, 9, 10]
+    assert [item.model_dump()["count"] for item in data] == list(range(6, 16))
     symbols = [item.symbol for item in data]
     assert set(symbols) == {"BTC", "ETH"}
     assert all(
@@ -89,6 +79,6 @@ async def test_count_generator_cleans_up_when_closed_early(
     finally:
         await domain.stop()
 
-    assert isinstance(first, ex01.CountModel)
-    assert (first.symbol, first.model_dump()["count"]) == ("ETH", 1)
-    assert "Must resource cleaned up - count: 1" in capsys.readouterr().out
+    assert isinstance(first, ex01.CountData)
+    assert (first.symbol, first.model_dump()["count"]) == ("ETH", 0)
+    assert "Must resource cleaned up - count: 0" in capsys.readouterr().out

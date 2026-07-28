@@ -1,4 +1,4 @@
-from collections.abc import AsyncGenerator, Callable, Coroutine
+from collections.abc import AsyncGenerator, Callable, Coroutine, Set
 from typing import (
     Any,
 )
@@ -104,7 +104,7 @@ class GeneratorDefiner[Treq: RequestModel, Tctx]:
     def __init__(self, init_ctx: Callable[[Treq], Tctx], req_t: type[Treq]) -> None:
         self._init_ctx = init_ctx
         self._binder: (
-            Callable[[Tctx, set[str], Receiver | None], AsyncGenerator[DataModel]] | None
+            Callable[[Tctx, Set[str], Receiver | None], AsyncGenerator[DataModel]] | None
         ) = None
         self._closer: Callable[[Tctx], Coroutine[Any, Any, None]] | None = None
         model_id = get_model_id(req_t)
@@ -114,8 +114,8 @@ class GeneratorDefiner[Treq: RequestModel, Tctx]:
         return self._init_ctx(req)
 
     def bind(
-        self, binder: Callable[[Tctx, set[str], Receiver | None], AsyncGenerator[DataModel]]
-    ) -> Callable[[Tctx, set[str], Receiver | None], AsyncGenerator[DataModel]]:
+        self, binder: Callable[[Tctx, Set[str], Receiver | None], AsyncGenerator[DataModel]]
+    ) -> Callable[[Tctx, Set[str], Receiver | None], AsyncGenerator[DataModel]]:
         self._binder = binder
         return binder
 
@@ -129,7 +129,7 @@ class GeneratorDefiner[Treq: RequestModel, Tctx]:
     def get_definer(cls, model_id: str):
         return cls._definer_dict.get(model_id)
 
-    def get_binder(self, ctx: Tctx, symbols: set[str], recv: Receiver | None):
+    def get_binder(self, ctx: Tctx, symbols: Set[str], recv: Receiver | None):
         binder = self._binder
         if binder is None:
             return None

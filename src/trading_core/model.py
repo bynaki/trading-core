@@ -1,6 +1,6 @@
 import json
 import re
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Coroutine, Mapping
 from importlib import import_module
 from types import ModuleType
 from typing import (
@@ -354,14 +354,16 @@ def cast_model[T: TrBaseModel](data: TrBaseModel, cast_t: type[T]) -> T:
 
 # close 되었다면 ClosedConnection 예외를 발생해야 한다.
 # type Sender = Callable[[DataModel], Coroutine[Any, Any, None]]
-class Sender(Protocol):
-    async def __call__(self, data: DataModel) -> None: ...
-    async def close(self) -> None: ...
+type Sender[T: DataModel] = Callable[[T], Coroutine[Any, Any, None]]
+# class Sender(Protocol):
+#     async def __call__(self, data: DataModel) -> None: ...
+
+# async def close(self) -> None: ...
 
 
-# type Receiver = Callable[[], Coroutine[Any, Any, DataModel]]
-class Receiver(Protocol):
-    async def __call__(self) -> DataModel: ...
+type Receiver = Callable[[], Coroutine[Any, Any, DataModel]]
+# class Receiver(Protocol):
+#     async def __call__(self) -> DataModel: ...
 
 
 #     async def close(self) -> None: ...

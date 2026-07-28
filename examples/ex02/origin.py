@@ -58,8 +58,7 @@ cat_names = [
 ]
 
 
-class NamingAllReq(RequestModel):
-    count: int
+class NamingAllReq(RequestModel): ...
 
 
 class NamingAllData(DataModel):
@@ -94,15 +93,16 @@ def naming(req: NamingAllReq) -> NamingAllContext:
 
 @naming.bind
 async def _(ctx: NamingAllContext, symbols: set[str], recv: Receiver | None):
-    req = ctx.req_model
     symbol_list = list(symbols)
     symbol_list.sort()
-    for i in range(req.count):
+    i = 0
+    while True:
         symbol = symbol_list[i % len(symbol_list)]
         flower = f"{flower_names[i % len(flower_names)]}:{symbol}"
         dog = f"{dog_names[i % len(dog_names)]}:{symbol}"
         cat = f"{cat_names[i % len(cat_names)]}:{symbol}"
         yield NamingAllData(flower=flower, dog=dog, cat=cat, count=i + 1, symbol=symbol)
+        i += 1
         await sleep(1)
 
 

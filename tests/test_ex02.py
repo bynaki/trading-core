@@ -11,6 +11,16 @@ from examples.ex02 import origin, refer
 from trading_core import Domain, TransmitQueue, cast_model
 
 
+def test_package_exports_example_api() -> None:
+    """패키지에서 예제 모델과 실행 함수를 직접 가져올 수 있는지 확인한다."""
+
+    assert ex02.NamingAllReq is origin.NamingAllReq
+    assert ex02.NamingAllData is origin.NamingAllData
+    assert ex02.NamingReq is refer.NamingReq
+    assert ex02.NamingData is refer.NamingData
+    assert callable(ex02.run_ex)
+
+
 @pytest.fixture(autouse=True)
 def clean_example_contexts() -> Iterator[None]:
     """각 테스트가 ex02의 클래스 수준 컨텍스트 저장소를 독립적으로 사용하게 한다."""
