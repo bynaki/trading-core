@@ -18,7 +18,6 @@ from .model import (
 class ClosedConnection(Exception): ...
 
 
-# class TransmitQueue(Sender):
 class TransmitQueue:
     def __init__(self):
         self._q = Queue[DataModel]()
@@ -38,16 +37,7 @@ class TransmitQueue:
         except QueueShutDown as exc:
             raise ClosedConnection("'TransmitQueue'가 이미 닫혔다. - recv()") from exc
 
-    # async def close(self) -> None:
-    #     self._q.shutdown()
-    #     self._closed = True
 
-    # @property
-    # def closed(self) -> bool:
-    #     return self._closed
-
-
-# class SharedSender(Sender):
 class SharedSender:
     def __init__(self):
         self._senders: set[tuple[Sender, frozenset[str]]] = set()
@@ -76,14 +66,6 @@ class SharedSender:
                     sent = True
         if not sent:
             print("warning: 데이터을 전송할 'Sender'가 없다.")
-
-    # async def close(self) -> None:
-    #     try:
-    #         async with TaskGroup() as tg:
-    #             for st in self._senders:
-    #                 tg.create_task(st[0].close())
-    #     finally:
-    #         self._senders.clear()
 
 
 class _StageCreationKey:
@@ -115,72 +97,8 @@ class BaseStage[T: RequestModel]:
 
 
 class Stage[T: RequestModel](BaseStage[T]):
-    # def __init__(self, key: _StageCreationKey, /, id: str, request: T) -> None:
-    #     super().__init__(key, id, request)
-
     async def update(self, symbols: Set[str]) -> None:
         raise StageError("'update()'가 구현되지 않았다.")
-
-
-# class StageA[Tout: Sender]:
-#     def __init__(
-#         self,
-#         key: _StageCreationKey,
-#         /,
-#         id: str,
-#         request: RequestModel,
-#         output: Tout,
-#     ) -> None:
-#         if key is not _STAGE_CREATION_KEY:
-#             raise TypeError("'Stage'는 'Domain'을 통해서만 생성할 수 있다.")
-#         self._id = id
-#         self._req_model = request
-#         self._output = output
-#         self._symbols: frozenset[str] = frozenset(set())
-#         self._update_cb: Callable[[Set[str], Sender | None], Coroutine[Any, Any, None]] | None = (
-#             None
-#         )
-
-#     @property
-#     def id(self) -> str:
-#         return self._id
-
-#     @property
-#     def req_model(self) -> RequestModel:
-#         return self._req_model
-
-#     @property
-#     def output(self) -> Tout:
-#         return self._output
-
-#     @property
-#     def symbols(self) -> frozenset[str]:
-#         return self._symbols
-
-# @property
-# def definer(self) -> GeneratorDefiner | None:
-#     return self._params.get("definer")
-
-# @property
-# def context(self) -> Any:
-#     return self._params.get("context")
-
-# async def update(self, symbols: Set[str]) -> None:
-#     self._symbols = frozenset(symbols)
-#     if self._update_cb is None:
-#         raise StageError("'update()'가 구현되지 않았다.")
-#     await self._update_cb(symbols, None)
-
-# def set_update_call(self, cb: Callable[[Set[str], Sender], Coroutine[Any, Any, None]]) -> None:
-#     self._update_cb = cb
-
-
-# class StageParam[Tout: Sender](TypedDict):
-#     id: str
-#     request: RequestModel
-#     output: Tout
-#     definer: GeneratorDefiner
-#     context: Any
 
 
 class OriginGenStage[T: RequestModel](BaseStage[T]):
@@ -193,32 +111,6 @@ class OriginGenStage[T: RequestModel](BaseStage[T]):
     @property
     def output(self) -> SharedSender:
         return cast(SharedSender, self._output)
-
-
-# class OriginGenStageA(Stage[SharedSender]):
-#     def __init__(
-#         self,
-#         key: _StageCreationKey,
-#         /,
-#         **params: Unpack[StageParam[SharedSender]],
-#     ) -> None:
-#         super().__init__(key, params["id"], params["request"], params["output"])
-#         self._definer = params["definer"]
-#         self._context = params["context"]
-#         self._update_cb: Callable[[Set[str], Sender | None], Coroutine[Any, Any, None]] | None = (
-#             None
-#         )
-
-#     @property
-#     def definer(self) -> GeneratorDefiner[RequestModel, Any] | None:
-#         return self._definer
-
-#     @property
-#     def context(self) -> Any:
-#         return self._context
-
-#     async def update(self, symbols: Set[str], sender: Sender | None = None) -> None:
-#         raise StageError("'update()'가 구현되지 않았다.")
 
 
 class Domain:
@@ -238,6 +130,21 @@ class Domain:
             yield stage
         finally:
             await self._close_stage(stage)
+
+    def request(self, req: RequestModel, symbols: set[str]):
+        return aclosing(self._gen_req(req, symbols))
+
+    async def start(self):
+        return await self._tmg.start()
+
+    async def wait(self):
+        return await self._tmg.wait()
+
+    async def stop(self):
+        return await self._tmg.stop()
+
+    def get_origin_stage(self, content_id: str):
+        return self._origin_stage_dict[content_id]
 
     async def _ensure_require_stage(
         self, req: RequestModel, transq: TransmitQueue, symbols: Set[str]
@@ -260,9 +167,6 @@ class Domain:
 
         async def update(symbols: Set[str]):
             origin_stage = self._define_origin_gen_stage(req)
-            # shared = origin_stage.output
-            # shared.set_sender(output, symbols)
-            # shared_symbols = shared.symbols
             await origin_stage.update(output, symbols)
 
         stage.update = update
@@ -270,7 +174,7 @@ class Domain:
 
     def _define_origin_gen_stage(self, req: RequestModel):
         id = self._generate_id(req)
-        content_id = req.get_tr_content_id(exclude={"symbols"})
+        content_id = req.get_tr_content_id()
         if origin_stage := self._origin_stage_dict.get(content_id):
             return origin_stage
         model_id = get_model_id(req)
@@ -286,7 +190,6 @@ class Domain:
         transq = TransmitQueue()
         update_lock = Lock()
         active_symbols: frozenset[str] | None = None
-        # completed = False
 
         async def update(sender: Sender, symbols: Set[str]):
             nonlocal active_symbols, gen
@@ -295,7 +198,6 @@ class Domain:
                 current_symbols = shared_sender.symbols
                 if current_symbols == active_symbols:
                     return
-                # if gen and not completed:
                 if gen:
                     await self._cancel_by_name(id)
                     await gen.aclose()
@@ -311,12 +213,7 @@ class Domain:
                         await closer()
                     active_symbols = current_symbols
                     return
-                # if completed:
-                #     active_symbols = current_symbols
-                #     return
-                #
-                # symbol_set = set(current_symbols)
-                symbol_set = frozenset(current_symbols)
+                symbol_set = set(current_symbols)
                 if require:
                     await self._ensure_require_stage(require, transq, symbol_set)
                     bind = definer.get_binder(ctx, symbol_set, transq.recv)
@@ -327,11 +224,8 @@ class Domain:
                 gen = bind()
 
                 async def _(gen: AsyncGenerator[DataModel]):
-                    # nonlocal completed
                     async for data in gen:
                         await shared_sender(data)
-                    # completed = True
-                    # await shared_sender.close()
 
                 await self._submit(_(gen), id)
                 active_symbols = current_symbols
@@ -340,27 +234,12 @@ class Domain:
         self._origin_stage_dict[content_id] = stage
         return stage
 
-    def request(self, req: RequestModel, symbols: set[str]):
-        return aclosing(self._gen_req(req, symbols))
-
     async def _gen_req(self, req: RequestModel, symbols: set[str]):
         q = TransmitQueue()
         async with self.stage(req, q) as stage:
             await stage.update(symbols)
-            try:
-                while True:
-                    yield await q.recv()
-            except ClosedConnection:
-                ...
-
-    async def start(self):
-        return await self._tmg.start()
-
-    async def wait(self):
-        return await self._tmg.wait()
-
-    async def stop(self):
-        return await self._tmg.stop()
+            while True:
+                yield await q.recv()
 
     async def _submit(self, coro: Coroutine[Any, Any, None], name: str):
         return await self._tmg.submit(coro, name)
@@ -369,7 +248,7 @@ class Domain:
         return await self._tmg.cancel_by_name(name)
 
     async def _close_stage(self, stage: Stage):
-        content_id = stage.req_model.get_tr_content_id(exclude={"symbols"})
+        content_id = stage.req_model.get_tr_content_id()
         origin = self._origin_stage_dict.get(content_id)
         if origin:
             await origin.update(stage.output, set())

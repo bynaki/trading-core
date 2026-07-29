@@ -1,18 +1,4 @@
-"""여러 파생 요청이 공유할 이름 데이터를 생성하는 원천 제너레이터 예제.
-
-``NamingAllReq``를 ``@generator``에 등록하고 꽃·개·고양이 이름을 모두 담은
-``NamingAllData``를 생성한다. 종류별 제너레이터를 각각 실행하는 대신 하나의
-넓은 원천 모델을 만들고, 파생 단계가 필요한 필드만 선택하여 재사용하게 한다.
-
-요청의 ``count``는 심볼별 발행 개수가 아니라 원천 전체의 발행 개수다. 원천은
-정렬한 구독 심볼을 순환하며 1초마다 데이터를 발행한다. 구독 심볼의 합집합이
-바뀌면 ``Domain``이 제너레이터를 새 심볼 목록으로 다시 시작할 수 있다.
-
-``NamingAllContext``는 요청을 content ID로 보관하여 동일 컨텍스트의 중복 생성을
-막는다. (의도한 대로다. 중복 생성하는지 확인하기 위해서다.) 지막 구독자가 사라지면
-``@naming.close``가 요청을 분리하여 컨텍스트의
-수명 주기를 마무리한다. 이 예제는 하나 이상의 심볼이 전달된다고 가정한다.
-"""
+"""여러 파생 요청이 공유하는 꽃·개·고양이 이름 원천 예제."""
 
 from asyncio import sleep
 
@@ -58,10 +44,13 @@ cat_names = [
 ]
 
 
-class NamingAllReq(RequestModel): ...
+class NamingAllReq(RequestModel):
+    """모든 이름 종류를 함께 요청하는 필드 없는 공통 원천 요청."""
 
 
 class NamingAllData(DataModel):
+    """한 심볼에 대응하는 세 종류의 이름과 발행 순번."""
+
     flower: str
     dog: str
     cat: str
@@ -69,6 +58,8 @@ class NamingAllData(DataModel):
 
 
 class NamingAllContext:
+    """원천 요청의 유일성과 binder 재시작 횟수를 추적하는 공유 컨텍스트."""
+
     cxt_dict: dict[str, NamingAllReq] = {}
 
     def __init__(self, req: NamingAllReq) -> None:
@@ -77,22 +68,33 @@ class NamingAllContext:
             "중복 'content_id' 갖은 객체는 생성할수 없다. 유일해야 한다."
         )
         self.cxt_dict[self.content_id] = req
+        self.count = 0
 
     @property
     def req_model(self) -> NamingAllReq:
+        """content ID에 연결된 원천 요청을 반환한다."""
+
         return self.cxt_dict[self.content_id]
 
     def detach(self) -> None:
+        """스테이지가 닫힐 때 클래스 수준 저장소에서 요청을 제거한다."""
+
         del self.cxt_dict[self.content_id]
 
 
 @generator(NamingAllReq)
 def naming(req: NamingAllReq) -> NamingAllContext:
+    """공통 이름 원천이 수명 동안 재사용할 컨텍스트를 만든다."""
+
     return NamingAllContext(req=req)
 
 
 @naming.bind
 async def _(ctx: NamingAllContext, symbols: set[str], recv: Receiver | None):
+    """정렬한 심볼을 순환하며 세 종류의 이름을 한 레코드로 발행한다."""
+
+    ctx.count += 1
+    print(f"!!!!!!! {ctx.count} Updating NamingAll Stage")
     symbol_list = list(symbols)
     symbol_list.sort()
     i = 0
@@ -108,5 +110,7 @@ async def _(ctx: NamingAllContext, symbols: set[str], recv: Receiver | None):
 
 @naming.close
 async def _(ctx: NamingAllContext):
+    """마지막 원천 구독이 사라지면 공유 컨텍스트를 분리한다."""
+
     ctx.detach()
-    print("Detached NamingAllReq")
+    print("******* Detached NamingAll Stage")

@@ -11,7 +11,6 @@ from typing import Any
 import pytest
 
 from trading_core import (
-    ClosedConnection,
     DataModel,
     DefineError,
     Domain,
@@ -121,30 +120,29 @@ def test_shared_sender_accepts_symbol_set() -> None:
     assert shared.symbols == set()
 
 
-async def test_shared_sender_routes_data_and_closes_senders() -> None:
-    """SharedSender가 심볼이 맞는 송신자에게 전달하고 종료 시 송신자를 닫는다."""
+async def test_shared_sender_routes_data_by_symbol() -> None:
+    """SharedSender가 등록된 심볼과 일치하는 데이터만 송신자에게 전달한다."""
     shared = SharedSender()
     sender = RecordingSender()
     shared.set_sender(sender, {"BTC"})
 
     data = Ping(symbol="BTC", msg="hello")
     await shared(data)
-    await shared.close()
+    await shared(Ping(symbol="ETH", msg="ignored"))
 
     assert sender.received == [data]
-    assert sender.closed
-    assert shared.symbols == set()
+    assert not sender.closed
+    assert shared.symbols == {"BTC"}
 
 
-async def test_transmit_queue_raises_closed_connection_after_close() -> None:
-    """닫힌 TransmitQueue의 송신과 수신 모두 ClosedConnection을 발생시킨다."""
+async def test_transmit_queue_round_trips_data() -> None:
+    """TransmitQueue가 sender 호출로 받은 데이터를 recv에서 그대로 반환한다."""
     queue = TransmitQueue()
-    await queue.close()
+    data = Ping(symbol="BTC", msg="queued")
 
-    with pytest.raises(ClosedConnection):
-        await queue.send(Ping())
-    with pytest.raises(ClosedConnection):
-        await queue.recv()
+    await queue(data)
+
+    assert await queue.recv() is data
 
 
 async def test_origin_stage_with_no_symbols_is_removed_and_closed() -> None:
@@ -247,22 +245,14 @@ async def test_shared_origin_restarts_only_when_symbol_union_changes() -> None:
         await domain.stop()
 
 
-async def test_completed_origin_does_not_restart_while_subscribers_detach() -> None:
-    """완료된 유한 원천은 구독자가 빠져나가는 동안 다시 시작하지 않는다."""
+async def test_completed_origin_restarts_when_subscription_union_changes() -> None:
+    """완료된 원천도 구독 심볼 합집합이 바뀌면 새 집합으로 다시 실행된다."""
 
     class FiniteReq(RequestModel):
         pass
 
     started = Queue[frozenset[str]]()
-    ready = Event()
-    release_close = Event()
-    close_started = Queue[None]()
-
-    class BlockingSender(RecordingSender):
-        async def close(self) -> None:
-            self.closed = True
-            close_started.put_nowait(None)
-            await release_close.wait()
+    emitted = Queue[frozenset[str]]()
 
     @generator(FiniteReq)
     def source(req: FiniteReq) -> object:
@@ -271,29 +261,26 @@ async def test_completed_origin_does_not_restart_while_subscribers_detach() -> N
     @source.bind
     async def bind(ctx: object, symbols: set[str], recv: Any):
         started.put_nowait(frozenset(symbols))
-        await ready.wait()
+        emitted.put_nowait(frozenset(symbols))
         yield Ping(symbol=next(iter(symbols)))
 
     domain = Domain()
     await domain.start()
 
     try:
-        async with domain.stage(FiniteReq(), BlockingSender()) as first:
+        async with domain.stage(FiniteReq(), RecordingSender()) as first:
             await first.update({"BTC"})
             assert await wait_for(started.get(), 1) == frozenset({"BTC"})
+            assert await wait_for(emitted.get(), 1) == frozenset({"BTC"})
 
-            async with domain.stage(FiniteReq(), BlockingSender()) as second:
+            async with domain.stage(FiniteReq(), RecordingSender()) as second:
                 await second.update({"ETH"})
                 assert await wait_for(started.get(), 1) == frozenset({"BTC", "ETH"})
-                ready.set()
-                await wait_for(close_started.get(), 1)
-                await wait_for(close_started.get(), 1)
+                assert await wait_for(emitted.get(), 1) == frozenset({"BTC", "ETH"})
 
-            with pytest.raises(TimeoutError):
-                await wait_for(started.get(), 0.05)
-            release_close.set()
+            assert await wait_for(started.get(), 1) == frozenset({"BTC"})
+            assert await wait_for(emitted.get(), 1) == frozenset({"BTC"})
     finally:
-        release_close.set()
         await domain.stop()
 
 

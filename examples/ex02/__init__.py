@@ -1,3 +1,5 @@
+"""ex02에서 공개하는 원천·파생 모델과 실행 함수."""
+
 from .origin import NamingAllData as NamingAllData
 from .origin import NamingAllReq as NamingAllReq
 from .refer import NamingData as NamingData

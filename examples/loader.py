@@ -3,7 +3,7 @@
 지정한 파이썬 파일을 모듈로 불러와 실행한다. 파일 안의 @task/@stage 데코레이터가
 실행되면서 전역 레지스트리에 등록된다.
 
-    uv run examples/main.py examples/ex01.py
+    uv run python examples/loader.py examples/ex01/ex01.py
 """
 
 import argparse
@@ -16,6 +16,8 @@ import trading_core as tc
 
 
 class Stage[Treq: tc.RequestModel]:
+    """로드한 요청 모델을 보관하는 최소 제네릭 컨테이너 예시."""
+
     def __init__(self, req: Treq):
         self._req_model = req
 
@@ -36,6 +38,8 @@ def load_module(path: Path) -> ModuleType:
 
 
 def main() -> None:
+    """명령행에서 받은 파이썬 파일을 로드하고 등록된 스테이지 수를 출력한다."""
+
     parser = argparse.ArgumentParser(description="파이썬 모듈 파일을 로드한다.")
     parser.add_argument("path", type=Path, help="로드할 .py 파일 경로")
     args = parser.parse_args()
