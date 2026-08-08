@@ -6,6 +6,7 @@ from types import ModuleType
 from typing import (
     Any,
     ClassVar,
+    Literal,
     Protocol,
     Self,
     TypedDict,
@@ -45,9 +46,16 @@ class TrAnnotation(TypedDict):
     generated_origin: str
 
 
+type ModelType = Literal[
+    "base", "unregistered", "generator", "dependent_generator", "request", "data"
+]
+
+_model_type_list = ("base", "unregistered", "generator", "dependent_generator", "request", "data")
+
+
 class TrBaseModel(BaseModel):
     _tr_model_id: ClassVar[str] = "__none__"  # 클래스 정의 시 자동 생성됨
-    _tr_model_type: ClassVar[str] = "base"
+    _tr_model_type: ClassVar[ModelType] = "base"
     # ClassVar를 사용해 Pydantic이 이 변수를 필드로 인식하지 않게 합니다.
     _tr_counter: ClassVar[int] = 0
     _tr_id: str = PrivateAttr(default="")
@@ -167,10 +175,16 @@ def get_model_inst_id(data: TrBaseModel | DataDump) -> str:
     return data["tr_annotation"]["id"]
 
 
-def get_model_type(data: TrBaseModel | type[TrBaseModel] | DataDump) -> str:
+def get_model_type(data: TrBaseModel | type[TrBaseModel] | DataDump) -> ModelType:
     if isinstance(data, dict):
-        return data["tr_annotation"]["model_type"]
-    return data._tr_model_type  # type: ignore
+        try:
+            model_type = data["tr_annotation"]["model_type"]
+            if model_type in _model_type_list:
+                return model_type
+            raise ModelError(f"기대한 'model type' 이 아니다. - {model_type}")
+        except Exception as e:
+            raise ModelError("'model_type' 요소가 없다.") from e
+    return data._tr_model_type
 
 
 def get_model_id(data: TrBaseModel | type[TrBaseModel] | DataDump) -> str:
@@ -207,7 +221,7 @@ class Runnable(Protocol):
     async def invoke(self, input: DataModel) -> DataModel | None: ...
 
 
-class Sequence[Treq: RequestModel]:
+class Sequence[Treq: BaseReqModel]:
     def __init__(self, pre: Sequence[Treq], *steps: Runnable):
         self._req = pre.require
         self._symbol = pre.symbol
@@ -254,7 +268,7 @@ class Sequence[Treq: RequestModel]:
         #     raise ExceptionGroup("Sequence Error!!", errors)
 
 
-class RequireSequence[Treq: RequestModel](Sequence):
+class RequireSequence[Treq: BaseReqModel](Sequence):
     def __init__(self, require: Treq, symbol: str):
         self._req = require
         self._symbol = symbol
@@ -262,33 +276,44 @@ class RequireSequence[Treq: RequestModel](Sequence):
         # self._joins: set[Sequence[RequestModel]] = set()
 
 
-class RequestModel(TrBaseModel):
-    _tr_model_type: ClassVar[str] = "unregistered"
+class BaseReqModel(TrBaseModel):
+    _tr_model_type: ClassVar[ModelType] = "unregistered"
     # _tr_request_list: ClassVar[list[Callable[[Self], RequestModel]]] = []
-
-    def __init_subclass__(cls, **kwargs: Any):
-        super().__init_subclass__(**kwargs)
-        cls._tr_require_cb: tuple[str, Callable[[Self], RequestModel]] | None = None
-
-    @classmethod
-    def require[Treq: RequestModel](cls, t_model: type[Treq]):
-        def wraper(cb: Callable[[Self], Treq]):
-            cls._tr_require_cb = (t_model._tr_model_id, cb)
-
-        return wraper
-
-    @property
-    def tr_require(self) -> RequestModel | None:
-        if not self._tr_require_cb:
-            return None
-        return self._tr_require_cb[1](self)
 
     def __call__(self, symbol: str) -> Sequence[Self]:
         return RequireSequence(self, symbol)
 
 
+class GenerateModel(BaseReqModel): ...
+
+
+class DependentModel(BaseReqModel):
+    def __init_subclass__(cls, **kwargs: Any):
+        super().__init_subclass__(**kwargs)
+        cls._tr_require_cb: Callable[[Self], GenerateModel | DependentModel] | None = None
+
+    @classmethod
+    def _set_require(cls, cb: Callable[[Self], GenerateModel | DependentModel]) -> None:
+        cls._tr_require_cb = cb
+
+    @property
+    def tr_require(self) -> GenerateModel | DependentModel | None:
+        callback = type(self)._tr_require_cb
+        if callback is None:
+            return None
+        return callback(self)
+
+    @classmethod
+    def require[Treq: GenerateModel | DependentModel](cls, cb: Callable[[Self], Treq]):
+        cls._tr_require_cb = cb
+        return cb
+
+
+class RequestModel(BaseReqModel): ...
+
+
 class DataModel(TrBaseModel):
-    _tr_model_type: ClassVar[str] = "data"
+    _tr_model_type: ClassVar[ModelType] = "data"
     symbol: str = ""
 
 

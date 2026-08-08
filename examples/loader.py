@@ -15,7 +15,7 @@ from types import ModuleType
 import trading_core as tc
 
 
-class Stage[Treq: tc.RequestModel]:
+class Stage[Treq: tc.BaseReqModel]:
     """로드한 요청 모델을 보관하는 최소 제네릭 컨테이너 예시."""
 
     def __init__(self, req: Treq):

@@ -268,7 +268,7 @@ async with domain.stage(request, StrategyInbox()) as stage:
 
 ## 파생 스트림과 의존 요청
 
-`RequestModel.require()`를 사용하면 한 요청의 binder가 다른 요청의 데이터를 입력으로
+`require()`를 사용하면 한 요청의 binder가 다른 요청의 데이터를 입력으로
 받을 수 있습니다. 예를 들어 하나의 원천 체결 스트림으로 체결가와 거래량 지표를 각각
 만들 수 있습니다.
 
@@ -281,12 +281,12 @@ class NotionalRequest(RequestModel):
     venue: str
 
 
-@NotionalRequest.require(RawTradeRequest)
-def _(request: NotionalRequest) -> RawTradeRequest:
+@require(NotionalRequest)
+def notional_requirement(request: NotionalRequest) -> RequestModel:
     return RawTradeRequest(venue=request.venue)
 
 
-@generator(NotionalRequest)
+@notional_requirement
 def notional(request: NotionalRequest) -> NotionalContext:
     return NotionalContext(request)
 
@@ -295,11 +295,8 @@ def notional(request: NotionalRequest) -> NotionalContext:
 async def _(
     context: NotionalContext,
     symbols: set[str],
-    receiver: Receiver | None,
+    receiver: Receiver,
 ):
-    if receiver is None:
-        raise RuntimeError("required stream is not connected")
-
     while raw := await receiver():
         trade = cast_model(raw, Trade)
         yield Notional(
@@ -369,7 +366,7 @@ async def _(
 | 예제 | 다루는 내용 | 상세 문서 |
 | --- | --- | --- |
 | `ex01` | `Domain.request()` 소비, 시작값부터 발행, 조기 종료와 두 단계 정리 | [examples/ex01/README.md](examples/ex01/README.md) |
-| `ex02` | `RequestModel.require()`, 공통 원천 공유, 파생 스트림, 심볼별 라우팅 | [examples/ex02/README.md](examples/ex02/README.md) |
+| `ex02` | `require()`, 공통 원천 공유, 파생 스트림, 심볼별 라우팅 | [examples/ex02/README.md](examples/ex02/README.md) |
 | `ex03` | `Domain.stage()`, 동적 심볼 교체, 동일 요청의 원천과 상태 공유 | [examples/ex03/README.md](examples/ex03/README.md) |
 
 프로젝트 루트에서 개별 예제 또는 전체 예제를 실행할 수 있습니다.

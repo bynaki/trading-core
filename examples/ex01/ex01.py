@@ -4,14 +4,13 @@ from asyncio import sleep
 
 from trading_core import (
     DataModel,
-    Receiver,
-    RequestModel,
-    generator,
+    GenerateModel,
     get_model_id,
+    initialize,
 )
 
 
-class CountReq(RequestModel):
+class CountReq(GenerateModel):
     """카운트 스트림의 시작값을 전달하는 요청 모델."""
 
     start: int
@@ -23,15 +22,15 @@ class CountData(DataModel):
     count: int
 
 
-@generator(CountReq)
+@initialize
 def gen01(req: CountReq) -> CountReq:
     """요청 자체를 원천 스테이지의 공유 컨텍스트로 사용한다."""
 
     return req
 
 
-@gen01.bind
-async def _(req: CountReq, symbols: set[str], recv: Receiver | None):
+@gen01
+async def _(req: CountReq, symbols: set[str]):
     """구독 심볼을 순환하며 취소될 때까지 카운트를 발행한다.
 
     ``finally``는 심볼 변경에 따른 재시작과 마지막 구독 해제 모두에서 실행되는
@@ -51,9 +50,9 @@ async def _(req: CountReq, symbols: set[str], recv: Receiver | None):
         print(f"Update 별로 리소스를 정리할 수 있다 - count: {count}")
 
 
-@gen01.close
+@gen01.detached
 async def _(req: CountReq):
     """마지막 구독이 사라질 때 스테이지 단위 자원을 정리한다."""
 
-    print(f"Closed Stage - {get_model_id(req)}")
+    print(f"Detached Stage - {get_model_id(req)}")
     print("Stage 별로 리소스를 정리할 수 있다.")

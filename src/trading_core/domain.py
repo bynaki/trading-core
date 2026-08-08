@@ -3,12 +3,16 @@ from collections.abc import AsyncGenerator, Coroutine, Set
 from contextlib import aclosing, asynccontextmanager
 from typing import Any, cast
 
-from .definer import GeneratorDefiner
+from .binder import (
+    BindPack,
+)
 from .exceptions import DomainError, StageError
 from .helper import TaskManager
 from .model import (
+    BaseReqModel,
     DataModel,
-    RequestModel,
+    DependentModel,
+    GenerateModel,
     Sender,
     get_model_id,
     get_model_type,
@@ -75,7 +79,7 @@ class _StageCreationKey:
 _STAGE_CREATION_KEY = _StageCreationKey()
 
 
-class BaseStage[T: RequestModel]:
+class BaseStage[T: BaseReqModel]:
     def __init__(self, key: _StageCreationKey, /, id: str, request: T, output: Sender) -> None:
         if key is not _STAGE_CREATION_KEY:
             raise TypeError("'Stage'는 'Domain'을 통해서만 생성할 수 있다.")
@@ -96,12 +100,12 @@ class BaseStage[T: RequestModel]:
         return self._output
 
 
-class Stage[T: RequestModel](BaseStage[T]):
+class Stage[T: BaseReqModel](BaseStage[T]):
     async def update(self, symbols: Set[str]) -> None:
         raise StageError("'update()'가 구현되지 않았다.")
 
 
-class OriginGenStage[T: RequestModel](BaseStage[T]):
+class OriginGenStage[T: BaseReqModel](BaseStage[T]):
     def __init__(self, key: _StageCreationKey, /, id: str, request: T) -> None:
         super().__init__(key, id, request, SharedSender())
 
@@ -120,7 +124,7 @@ class Domain:
         self._count = 0
 
     @asynccontextmanager
-    async def stage(self, req: RequestModel, output: Sender):
+    async def stage(self, req: BaseReqModel, output: Sender):
         if get_model_type(req) == "generator":
             stage = self._define_gen_stage(req, output)
         else:
@@ -131,7 +135,7 @@ class Domain:
         finally:
             await self._close_stage(stage)
 
-    def request(self, req: RequestModel, symbols: set[str]):
+    def request(self, req: BaseReqModel, symbols: set[str]):
         return aclosing(self._gen_req(req, symbols))
 
     async def start(self):
@@ -147,7 +151,7 @@ class Domain:
         return self._origin_stage_dict[content_id]
 
     async def _ensure_require_stage(
-        self, req: RequestModel, transq: TransmitQueue, symbols: Set[str]
+        self, req: BaseReqModel, transq: TransmitQueue, symbols: Set[str]
     ):
         content_id = req.get_tr_content_id()
         stage = self._origin_stage_dict.get(content_id)
@@ -157,7 +161,7 @@ class Domain:
             stage = self._define_origin_gen_stage(req)
         await stage.update(transq, symbols)
 
-    def _define_gen_stage(self, req: RequestModel, output: Sender):
+    def _define_gen_stage(self, req: BaseReqModel, output: Sender):
         stage = Stage(
             _STAGE_CREATION_KEY,
             id=self._generate_id(req),
@@ -172,14 +176,14 @@ class Domain:
         stage.update = update
         return stage
 
-    def _define_origin_gen_stage(self, req: RequestModel):
+    def _define_origin_gen_stage(self, req: BaseReqModel):
         id = self._generate_id(req)
         content_id = req.get_tr_content_id()
         if origin_stage := self._origin_stage_dict.get(content_id):
             return origin_stage
         model_id = get_model_id(req)
-        definer = self._get_gen_definer(model_id)
-        ctx = definer(req)
+        bind_pack = self._get_bind_pack(model_id)
+        ctx = bind_pack._init_cb(req)
         stage = OriginGenStage(
             _STAGE_CREATION_KEY,
             id=id,
@@ -191,50 +195,89 @@ class Domain:
         update_lock = Lock()
         active_symbols: frozenset[str] | None = None
 
-        async def update(sender: Sender, symbols: Set[str]):
-            nonlocal active_symbols, gen
-            async with update_lock:
-                shared_sender.set_sender(sender, symbols)
-                current_symbols = shared_sender.symbols
-                if current_symbols == active_symbols:
-                    return
-                if gen:
-                    await self._cancel_by_name(id)
-                    await gen.aclose()
-                    gen = None
-                require = req.tr_require
-                # 업데이트 심볼이 없다면 자원 정리한다.
-                if not current_symbols:
-                    if require:
-                        await self._ensure_require_stage(require, transq, set())
-                    self._origin_stage_dict.pop(content_id, None)
-                    closer = definer.get_closer(ctx)
-                    if closer:
-                        await closer()
+        if get_model_type(req) == "generator":
+            if not isinstance(req, GenerateModel):
+                raise StageError(f"'GenerateModel'이어야 한다. - {get_model_id(req)}")
+            binded_cb = bind_pack.get_generate_cb()
+            if binded_cb is None:
+                raise StageError(f"'generator_cb'가 'bind'되지 않았다. - {get_model_id(req)}")
+
+            async def update(sender: Sender, symbols: Set[str]):
+                nonlocal active_symbols, gen
+                async with update_lock:
+                    shared_sender.set_sender(sender, symbols)
+                    current_symbols = shared_sender.symbols
+                    if current_symbols == active_symbols:
+                        return
+                    if gen:
+                        await self._cancel_by_name(id)
+                        await gen.aclose()
+                        gen = None
+                    # 업데이트 심볼이 없다면 자원 정리한다.
+                    if not current_symbols:
+                        self._origin_stage_dict.pop(content_id, None)
+                        if bind_pack._detach_cb:
+                            await bind_pack._detach_cb(ctx)
+                        active_symbols = current_symbols
+                        return
+                    symbol_set = set(current_symbols)
+                    gen = binded_cb(ctx, symbol_set)
+
+                    async def _(gen: AsyncGenerator[DataModel]):
+                        async for data in gen:
+                            await shared_sender(data)
+
+                    await self._submit(_(gen), id)
                     active_symbols = current_symbols
-                    return
-                symbol_set = set(current_symbols)
-                if require:
+        #
+        elif get_model_type(req) == "dependent_generator":
+            if not isinstance(req, DependentModel):
+                raise StageError(f"'DependentModel'이어야 한다. - {get_model_id(req)}")
+            binded_cb = bind_pack.get_dependent_cb()
+            if binded_cb is None:
+                raise StageError(f"'dependent_cb'가 'bind'되지 않았다. - {get_model_id(req)}")
+            require = req.tr_require
+            if require is None:
+                raise StageError(f"'tr_require'가 필요하다. - {get_model_id(req)}")
+
+            async def update(sender: Sender, symbols: Set[str]):
+                nonlocal active_symbols, gen
+                async with update_lock:
+                    shared_sender.set_sender(sender, symbols)
+                    current_symbols = shared_sender.symbols
+                    if current_symbols == active_symbols:
+                        return
+                    if gen:
+                        await self._cancel_by_name(id)
+                        await gen.aclose()
+                        gen = None
+                    # 업데이트 심볼이 없다면 자원 정리한다.
+                    if not current_symbols:
+                        await self._ensure_require_stage(require, transq, set())
+                        self._origin_stage_dict.pop(content_id, None)
+                        if bind_pack._detach_cb:
+                            await bind_pack._detach_cb(ctx)
+                        active_symbols = current_symbols
+                        return
+                    symbol_set = set(current_symbols)
                     await self._ensure_require_stage(require, transq, symbol_set)
-                    bind = definer.get_binder(ctx, symbol_set, transq.recv)
-                else:
-                    bind = definer.get_binder(ctx, symbol_set, None)
-                if bind is None:
-                    raise StageError("'bind'되지 않았다.")
-                gen = bind()
+                    gen = binded_cb(ctx, symbol_set, transq.recv)
 
-                async def _(gen: AsyncGenerator[DataModel]):
-                    async for data in gen:
-                        await shared_sender(data)
+                    async def _(gen: AsyncGenerator[DataModel]):
+                        async for data in gen:
+                            await shared_sender(data)
 
-                await self._submit(_(gen), id)
-                active_symbols = current_symbols
-
+                    await self._submit(_(gen), id)
+                    active_symbols = current_symbols
+        #
+        else:
+            raise StageError("'origin stage'는 'GenerateModel', 'DependentModel' 만 허락한다.")
+        #
         stage.update = update
         self._origin_stage_dict[content_id] = stage
         return stage
 
-    async def _gen_req(self, req: RequestModel, symbols: set[str]):
+    async def _gen_req(self, req: BaseReqModel, symbols: set[str]):
         q = TransmitQueue()
         async with self.stage(req, q) as stage:
             await stage.update(symbols)
@@ -253,12 +296,12 @@ class Domain:
         if origin:
             await origin.update(stage.output, set())
 
-    def _generate_id(self, req: RequestModel):
+    def _generate_id(self, req: BaseReqModel):
         self._count += 1
         return f"{get_model_id(req)}:{self._count}"
 
-    def _get_gen_definer(self, model_id: str) -> GeneratorDefiner:
-        definer = GeneratorDefiner.get_definer(model_id)
-        if definer is None:
-            raise DomainError(f"요청한 'RequestModel'의 'Definer'를 찾을 수 없다. - {model_id}")
-        return definer
+    def _get_bind_pack(self, model_id: str) -> BindPack:
+        bind_pack = BindPack.get_binder(model_id)
+        if bind_pack is None:
+            raise DomainError(f"요청한 'RequestModel'의 'Binder'를 찾을 수 없다. - {model_id}")
+        return bind_pack

@@ -1,39 +1,66 @@
-import asyncio
-from contextlib import aclosing
+from typing import ClassVar, overload
 
 
-async def loop():
-    i = 0
-    try:
-        for i in range(10):
-            yield i
-            await asyncio.sleep(1)
-    finally:
-        print(f"loop({i})")
+class BaseTest: ...
 
 
-async def main():
-    count = 0
-    async for i in loop():
-        print(i)
-        count += 1
-        if count == 5:
-            break
-    async for i in loop():
-        print(i)
+class Test(BaseTest): ...
 
 
-async def main2():
-    async with aclosing(loop()) as gen:
-        count = 0
-        async for i in gen:
-            print(i)
-            count += 1
-            if count == 5:
-                break
-    async with aclosing(loop()) as gen:
-        async for i in gen:
-            print(i)
+class TestFetchable(BaseTest):
+    def __init__(self) -> None:
+        self.require: bool = False
+
+    def set_require(self, req: bool):
+        self.require = req
 
 
-asyncio.run(main())
+class BaseBinder:
+    def __init__(self, name: str) -> None:
+        self.name = name
+
+
+class Binder(BaseBinder):
+    def __init__(self) -> None:
+        super().__init__("binder")
+
+
+class FetchableBinder(BaseBinder):
+    def __init__(self) -> None:
+        super().__init__("fetchable_binder")
+
+
+@overload
+def require[T: Test](test_t: type[T]) -> Binder: ...
+@overload
+def require[T: TestFetchable](test_t: type[T]) -> FetchableBinder: ...
+
+
+def require[T: Test | TestFetchable](test_t: type[T]) -> Binder | FetchableBinder:
+    if issubclass(test_t, TestFetchable):
+        return FetchableBinder()
+    else:
+        return Binder()
+
+
+print(require(Test).name)
+print(require(TestFetchable).name)
+
+
+class BaseModel:
+    tr_model_type: ClassVar[str] = "base"
+
+
+class RequestModel(BaseModel): ...
+
+
+class DataModel(BaseModel): ...
+
+
+RequestModel.tr_model_type = "request"
+DataModel.tr_model_type = "data"
+
+
+print(BaseModel.tr_model_type)
+print(RequestModel.tr_model_type)
+print(DataModel.tr_model_type)

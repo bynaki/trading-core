@@ -5,10 +5,10 @@ from asyncio import sleep
 from collections.abc import Set
 from typing import Literal
 
-from trading_core import DataModel, Receiver, RequestModel, generator
+from trading_core import DataModel, GenerateModel, initialize
 
 
-class PriceReq(RequestModel):
+class PriceReq(GenerateModel):
     """가격 증가 단위를 결정할 OHLC 종류를 지정하는 요청."""
 
     ohlc: Literal["open", "high", "low", "close"]
@@ -37,7 +37,7 @@ class PriceContext:
         return self._count_dict[symbol] * self._quantity
 
 
-@generator(PriceReq)
+@initialize
 def price(req: PriceReq):
     """OHLC 종류를 가격 증가 단위로 바꾸어 스테이지 컨텍스트를 만든다."""
 
@@ -53,8 +53,8 @@ def price(req: PriceReq):
     return PriceContext(quantity)
 
 
-@price.bind
-async def _(ctx: PriceContext, symbols: Set[str], recv: Receiver | None):
+@price
+async def _(ctx: PriceContext, symbols: Set[str]):
     """현재 구독 심볼 중 하나를 무작위로 골라 가격을 계속 발행한다."""
 
     ctx.updating_count += 1
@@ -68,7 +68,7 @@ async def _(ctx: PriceContext, symbols: Set[str], recv: Receiver | None):
         print("Update 별로 자원을 정리할 수 있다.")
 
 
-@price.close
+@price.detached
 async def _(ctx: PriceContext):
     """마지막 구독이 사라질 때 원천 스테이지 종료를 알린다."""
 

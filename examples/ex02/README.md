@@ -1,4 +1,4 @@
-# ex02: `RequestModel.require()`로 원천 데이터 공유하기
+# ex02: `require()`로 원천 데이터 공유하기
 
 이 예제는 한 요청이 다른 요청의 데이터를 필요로 한다는 의존 관계를 선언하고,
 공통 원천 데이터를 여러 파생 요청이 공유하는 방법을 보여준다. 꽃·개·고양이 이름을
@@ -16,9 +16,14 @@
 `NamingReq`는 다음과 같이 필요한 원천 요청을 선언한다.
 
 ```python
-@NamingReq.require(origin.NamingAllReq)
-def _(req: NamingReq):
+@require(NamingReq)
+def naming_requirement(req: NamingReq) -> RequestModel:
     return origin.NamingAllReq()
+
+
+@naming_requirement
+def naming(req: NamingReq) -> NamingContext:
+    return NamingContext(req=req)
 ```
 
 `Domain`은 `NamingReq` 스테이지를 만들 때 `tr_require`를 확인한다. 필요한

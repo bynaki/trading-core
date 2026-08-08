@@ -2,7 +2,7 @@
 
 from asyncio import sleep
 
-from trading_core import DataModel, Receiver, RequestModel, generator
+from trading_core import DataModel, GenerateModel, initialize
 
 flower_names = [
     "Rose",
@@ -44,7 +44,7 @@ cat_names = [
 ]
 
 
-class NamingAllReq(RequestModel):
+class NamingAllReq(GenerateModel):
     """모든 이름 종류를 함께 요청하는 필드 없는 공통 원천 요청."""
 
 
@@ -82,15 +82,15 @@ class NamingAllContext:
         del self.cxt_dict[self.content_id]
 
 
-@generator(NamingAllReq)
+@initialize
 def naming(req: NamingAllReq) -> NamingAllContext:
     """공통 이름 원천이 수명 동안 재사용할 컨텍스트를 만든다."""
 
     return NamingAllContext(req=req)
 
 
-@naming.bind
-async def _(ctx: NamingAllContext, symbols: set[str], recv: Receiver | None):
+@naming
+async def _(ctx: NamingAllContext, symbols: set[str]):
     """정렬한 심볼을 순환하며 세 종류의 이름을 한 레코드로 발행한다."""
 
     ctx.count += 1
@@ -108,7 +108,7 @@ async def _(ctx: NamingAllContext, symbols: set[str], recv: Receiver | None):
         await sleep(1)
 
 
-@naming.close
+@naming.detached
 async def _(ctx: NamingAllContext):
     """마지막 원천 구독이 사라지면 공유 컨텍스트를 분리한다."""
 

@@ -11,16 +11,17 @@ from typing import Any
 import pytest
 
 from trading_core import (
+    BaseReqModel,
     DataModel,
     DefineError,
     Domain,
     ModelError,
-    RequestModel,
     Sequence,
     Stage,
     TransmitQueue,
     generator,
     processor,
+    require,
     set_origin_name,
     task,
 )
@@ -76,6 +77,25 @@ def test_model_id_is_stable_per_class() -> None:
     assert get_model_id(Ping) != get_model_id(Pong)
 
 
+def test_require_registers_dependency_and_builds_receiver_generator() -> None:
+    class OriginReq(BaseReqModel):
+        pass
+
+    class DerivedReq(BaseReqModel):
+        pass
+
+    @require(DerivedReq)
+    def derived_requirement(req: DerivedReq) -> BaseReqModel:
+        return OriginReq()
+
+    @derived_requirement
+    def derived(req: DerivedReq) -> object:
+        return object()
+
+    assert isinstance(DerivedReq().tr_require, OriginReq)
+    assert derived(DerivedReq()) is not None
+
+
 def test_content_id_tracks_content() -> None:
     """content_id는 반대로 '내용'에 따라 달라진다.
 
@@ -89,7 +109,7 @@ def test_content_id_tracks_content() -> None:
     assert a.get_tr_content_id() != c.get_tr_content_id()
 
 
-class QuoteReq(RequestModel):
+class QuoteReq(BaseReqModel):
     pass
 
 
@@ -148,7 +168,7 @@ async def test_transmit_queue_round_trips_data() -> None:
 async def test_origin_stage_with_no_symbols_is_removed_and_closed() -> None:
     """구독 심볼이 없는 원천 스테이지는 제거되고 컨텍스트 종료 콜백을 실행한다."""
 
-    class EmptyReq(RequestModel):
+    class EmptyReq(BaseReqModel):
         pass
 
     class Context:
@@ -164,7 +184,7 @@ async def test_origin_stage_with_no_symbols_is_removed_and_closed() -> None:
         return context
 
     @source.bind
-    async def bind(ctx: Context, symbols: set[str], recv: Any):
+    async def bind(ctx: Context, symbols: set[str]):
         yield Ping()
 
     @source.close
@@ -189,7 +209,7 @@ async def test_origin_stage_with_no_symbols_is_removed_and_closed() -> None:
 async def test_missing_required_stage_is_not_created_for_empty_symbols() -> None:
     """요구 심볼이 없으면 불필요한 의존 원천 스테이지를 생성하지 않는다."""
 
-    class RequiredReq(RequestModel):
+    class RequiredReq(BaseReqModel):
         pass
 
     contexts: list[object] = []
@@ -209,7 +229,7 @@ async def test_missing_required_stage_is_not_created_for_empty_symbols() -> None
 async def test_shared_origin_restarts_only_when_symbol_union_changes() -> None:
     """공유 원천은 전체 구독 심볼의 합집합이 달라질 때만 다시 시작한다."""
 
-    class SharedReq(RequestModel):
+    class SharedReq(BaseReqModel):
         pass
 
     started = Queue[frozenset[str]]()
@@ -219,7 +239,7 @@ async def test_shared_origin_restarts_only_when_symbol_union_changes() -> None:
         return object()
 
     @source.bind
-    async def bind(ctx: object, symbols: set[str], recv: Any):
+    async def bind(ctx: object, symbols: set[str]):
         started.put_nowait(frozenset(symbols))
         await Event().wait()
         yield Ping()
@@ -248,7 +268,7 @@ async def test_shared_origin_restarts_only_when_symbol_union_changes() -> None:
 async def test_completed_origin_restarts_when_subscription_union_changes() -> None:
     """완료된 원천도 구독 심볼 합집합이 바뀌면 새 집합으로 다시 실행된다."""
 
-    class FiniteReq(RequestModel):
+    class FiniteReq(BaseReqModel):
         pass
 
     started = Queue[frozenset[str]]()
@@ -259,7 +279,7 @@ async def test_completed_origin_restarts_when_subscription_union_changes() -> No
         return object()
 
     @source.bind
-    async def bind(ctx: object, symbols: set[str], recv: Any):
+    async def bind(ctx: object, symbols: set[str]):
         started.put_nowait(frozenset(symbols))
         emitted.put_nowait(frozenset(symbols))
         yield Ping(symbol=next(iter(symbols)))
@@ -408,7 +428,7 @@ def test_domain_rejects_duplicate_registration() -> None:
     동일 요청 타입의 중복 등록은 막혀야 한다.
     """
 
-    class DupReq(RequestModel):
+    class DupReq(BaseReqModel):
         pass
 
     @processor(DupReq)

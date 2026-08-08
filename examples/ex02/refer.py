@@ -2,7 +2,14 @@
 
 from typing import Literal
 
-from trading_core import ClosedConnection, DataModel, Receiver, RequestModel, cast_model, generator
+from trading_core import (
+    ClosedConnection,
+    DataModel,
+    DependentModel,
+    Receiver,
+    cast_model,
+    initialize,
+)
 
 if __package__:
     from . import origin
@@ -10,14 +17,14 @@ else:
     import origin
 
 
-class NamingReq(RequestModel):
+class NamingReq(DependentModel):
     """원천 데이터에서 선택할 이름 종류를 지정하는 파생 요청."""
 
     kind: Literal["flower", "dog", "cat"]
 
 
-@NamingReq.require(origin.NamingAllReq)
-def _(req: NamingReq):
+@NamingReq.require
+def naming_requirement(req: NamingReq) -> origin.NamingAllReq:
     """모든 파생 요청을 필드 없는 동일한 원천 요청에 연결한다."""
 
     return origin.NamingAllReq()
@@ -54,19 +61,17 @@ class NamingContext:
         del self.cxt_dict[self.content_id]
 
 
-@generator(NamingReq)
+@initialize
 def naming(req: NamingReq) -> NamingContext:
     """파생 요청의 공유 컨텍스트를 만든다."""
 
     return NamingContext(req=req)
 
 
-@naming.bind
-async def _(ctx: NamingContext, symbols: set[str], recv: Receiver | None):
+@naming
+async def _(ctx: NamingContext, symbols: set[str], recv: Receiver):
     """원천 데이터를 수신하여 요청한 종류의 이름만 발행한다."""
 
-    if recv is None:
-        raise Exception("'Receiver'가 있어야 한다.")
     ctx.count += 1
     print(f"!!!!!!! {ctx.count} Updating Naming Stage - req: {ctx.req_model.kind}")
     try:
@@ -87,7 +92,7 @@ async def _(ctx: NamingContext, symbols: set[str], recv: Receiver | None):
         print(f"Closed Receiver at NamingReq Binder - {e}")
 
 
-@naming.close
+@naming.detached
 async def _(ctx: NamingContext):
     """마지막 파생 구독이 사라지면 공유 컨텍스트를 분리한다."""
 
