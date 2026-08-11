@@ -41,7 +41,7 @@ async def _(req: CountReq, symbols: set[str]):
     start = req.start
     count = start
     try:
-        while count:
+        while True:
             remainder = count % len(sym_list)
             yield CountData(symbol=sym_list[remainder], count=count)
             count += 1

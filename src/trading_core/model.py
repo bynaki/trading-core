@@ -2,6 +2,7 @@ import json
 import re
 from collections.abc import Callable, Coroutine, Mapping
 from importlib import import_module
+from inspect import signature
 from types import ModuleType
 from typing import (
     Any,
@@ -290,23 +291,83 @@ class GenerateModel(BaseReqModel): ...
 class DependentModel(BaseReqModel):
     def __init_subclass__(cls, **kwargs: Any):
         super().__init_subclass__(**kwargs)
-        cls._tr_require_cb: Callable[[Self], GenerateModel | DependentModel] | None = None
+        cls._tr_require_cb: RequireCbWithSym[Self] | None = None
 
     @classmethod
-    def _set_require(cls, cb: Callable[[Self], GenerateModel | DependentModel]) -> None:
-        cls._tr_require_cb = cb
+    def _set_require(cls, cb: RequireCb | RequireCbWithSym) -> None:
+        """require 콜백을 `RequireCbWithSym` 형태로 정규화해 보관한다.
+
+        `RequireCb`(요청만 받는 형태)로 등록하면 심볼 집합을 그대로 흘려보내는
+        래퍼로 감싼다. 덕분에 소비처는 두 형태를 구분할 필요가 없다.
+        """
+        if _takes_symbols(cb):
+            cls._tr_require_cb = cast("RequireCbWithSym[Self]", cb)
+            return
+        plain = cast("RequireCb[Self]", cb)
+
+        def with_sym(
+            req: Any, symbols: set[str]
+        ) -> tuple[GenerateModel | DependentModel, set[str]]:
+            return plain(req), symbols
+
+        cls._tr_require_cb = with_sym
 
     @property
-    def tr_require(self) -> GenerateModel | DependentModel | None:
+    def tr_require(self) -> GenerateModel | DependentModel:
         callback = type(self)._tr_require_cb
         if callback is None:
-            return None
-        return callback(self)
+            raise ModelError(f"'require' 정의가 필요하다. - {get_model_id(self)}")
+        return callback(self, set[str]())[0]
+
+    def get_tr_require_with_symbol(
+        self, symbols: set[str]
+    ) -> tuple[GenerateModel | DependentModel, set[str]]:
+        callback = type(self)._tr_require_cb
+        if callback is None:
+            raise ModelError(f"'require' 정의가 필요하다. - {get_model_id(self)}")
+        return callback(self, set(symbols))
+
+    @overload
+    @classmethod
+    def require[Treq: GenerateModel | DependentModel](
+        cls, cb: Callable[[Self], Treq]
+    ) -> Callable[[Self], Treq]: ...
+
+    @overload
+    @classmethod
+    def require[Treq: GenerateModel | DependentModel](
+        cls, cb: Callable[[Self, set[str]], tuple[Treq, set[str]]]
+    ) -> Callable[[Self, set[str]], tuple[Treq, set[str]]]: ...
 
     @classmethod
-    def require[Treq: GenerateModel | DependentModel](cls, cb: Callable[[Self], Treq]):
-        cls._tr_require_cb = cb
+    def require(cls, cb: RequireCb[Self] | RequireCbWithSym[Self]) -> Any:
+        """상위 요청을 만드는 require 콜백을 등록한다.
+
+        요청만 받는 형태(`RequireCb`)와 심볼 집합까지 받아 변형하는 형태
+        (`RequireCbWithSym`) 둘 다 받는다.
+        """
+        cls._set_require(cb)
         return cb
+
+
+type RequireCb[Tdep: DependentModel] = Callable[[Tdep], GenerateModel | DependentModel]
+type RequireCbWithSym[Tdep: DependentModel] = Callable[
+    [Tdep, set[str]], tuple[GenerateModel | DependentModel, set[str]]
+]
+
+
+def _takes_symbols(cb: RequireCb | RequireCbWithSym) -> bool:
+    """require 콜백이 심볼 집합까지 받는 형태(`RequireCbWithSym`)인지 판별한다.
+
+    두 별칭은 런타임에 그냥 `Callable`이라 `isinstance`로 구분할 수 없다.
+    위치 인자 개수로 판단한다.
+    """
+    params = [
+        p
+        for p in signature(cb).parameters.values()
+        if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)
+    ]
+    return len(params) >= 2
 
 
 class RequestModel(BaseReqModel): ...

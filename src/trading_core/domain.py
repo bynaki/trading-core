@@ -1,5 +1,5 @@
 from asyncio import Lock, Queue, QueueShutDown, TaskGroup
-from collections.abc import AsyncGenerator, Coroutine, Set
+from collections.abc import AsyncGenerator, Coroutine
 from contextlib import aclosing, asynccontextmanager
 from typing import Any, cast
 
@@ -46,7 +46,7 @@ class SharedSender:
     def __init__(self):
         self._senders: set[tuple[Sender, frozenset[str]]] = set()
 
-    def set_sender(self, sender: Sender, symbols: Set[str]):
+    def set_sender(self, sender: Sender, symbols: set[str]):
         for st in self._senders:
             if st[0] == sender:
                 self._senders.remove(st)
@@ -55,11 +55,11 @@ class SharedSender:
             self._senders.add((sender, frozenset(symbols)))
 
     @property
-    def symbols(self) -> frozenset[str]:
+    def symbols(self) -> set[str]:
         syms: set[str] = set()
         for st in self._senders:
             syms.update(st[1])
-        return frozenset(syms)
+        return set(syms)
 
     async def __call__(self, data: DataModel) -> None:
         sent = False
@@ -101,7 +101,7 @@ class BaseStage[T: BaseReqModel]:
 
 
 class Stage[T: BaseReqModel](BaseStage[T]):
-    async def update(self, symbols: Set[str]) -> None:
+    async def update(self, symbols: set[str]) -> None:
         raise StageError("'update()'가 구현되지 않았다.")
 
 
@@ -109,7 +109,7 @@ class OriginGenStage[T: BaseReqModel](BaseStage[T]):
     def __init__(self, key: _StageCreationKey, /, id: str, request: T) -> None:
         super().__init__(key, id, request, SharedSender())
 
-    async def update(self, sender: Sender, symbols: Set[str]) -> None:
+    async def update(self, sender: Sender, symbols: set[str]) -> None:
         raise StageError("'update()'가 구현되지 않았다.")
 
     @property
@@ -151,7 +151,7 @@ class Domain:
         return self._origin_stage_dict[content_id]
 
     async def _ensure_require_stage(
-        self, req: BaseReqModel, transq: TransmitQueue, symbols: Set[str]
+        self, req: BaseReqModel, transq: TransmitQueue, symbols: set[str]
     ):
         content_id = req.get_tr_content_id()
         stage = self._origin_stage_dict.get(content_id)
@@ -169,7 +169,7 @@ class Domain:
             output=output,
         )
 
-        async def update(symbols: Set[str]):
+        async def update(symbols: set[str]):
             origin_stage = self._define_origin_gen_stage(req)
             await origin_stage.update(output, symbols)
 
@@ -193,7 +193,7 @@ class Domain:
         gen: AsyncGenerator[DataModel] | None = None
         transq = TransmitQueue()
         update_lock = Lock()
-        active_symbols: frozenset[str] | None = None
+        active_symbols: set[str] | None = None
 
         if get_model_type(req) == "generator":
             if not isinstance(req, GenerateModel):
@@ -202,7 +202,7 @@ class Domain:
             if binded_cb is None:
                 raise StageError(f"'generator_cb'가 'bind'되지 않았다. - {get_model_id(req)}")
 
-            async def update(sender: Sender, symbols: Set[str]):
+            async def update(sender: Sender, symbols: set[str]):
                 nonlocal active_symbols, gen
                 async with update_lock:
                     shared_sender.set_sender(sender, symbols)
@@ -236,13 +236,11 @@ class Domain:
             binded_cb = bind_pack.get_dependent_cb()
             if binded_cb is None:
                 raise StageError(f"'dependent_cb'가 'bind'되지 않았다. - {get_model_id(req)}")
-            require = req.tr_require
-            if require is None:
-                raise StageError(f"'tr_require'가 필요하다. - {get_model_id(req)}")
 
-            async def update(sender: Sender, symbols: Set[str]):
+            async def update(sender: Sender, symbols: set[str]):
                 nonlocal active_symbols, gen
                 async with update_lock:
+                    require, req_symbols = req.get_tr_require_with_symbol(symbols)
                     shared_sender.set_sender(sender, symbols)
                     current_symbols = shared_sender.symbols
                     if current_symbols == active_symbols:
@@ -259,8 +257,8 @@ class Domain:
                             await bind_pack._detach_cb(ctx)
                         active_symbols = current_symbols
                         return
+                    await self._ensure_require_stage(require, transq, req_symbols)
                     symbol_set = set(current_symbols)
-                    await self._ensure_require_stage(require, transq, symbol_set)
                     gen = binded_cb(ctx, symbol_set, transq.recv)
 
                     async def _(gen: AsyncGenerator[DataModel]):
