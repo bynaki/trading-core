@@ -240,11 +240,14 @@ class Domain:
             async def update(sender: Sender, symbols: set[str]):
                 nonlocal active_symbols, gen
                 async with update_lock:
-                    require, req_symbols = req.get_tr_require_with_symbol(symbols)
                     shared_sender.set_sender(sender, symbols)
                     current_symbols = shared_sender.symbols
                     if current_symbols == active_symbols:
                         return
+                    # 상위에 등록하는 심볼도 이 스테이지의 합집합이어야 한다. 이번
+                    # update의 symbols만 넘기면 같은 transq의 이전 등록을 덮어써
+                    # 먼저 구독한 쪽이 상위에서 사라진다.
+                    require, req_symbols = req.get_tr_require_with_symbol(current_symbols)
                     if gen:
                         await self._cancel_by_name(id)
                         await gen.aclose()
