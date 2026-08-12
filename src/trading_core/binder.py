@@ -68,10 +68,6 @@ class BindPack[Tctx, Treq: BaseReqModel]:
             raise BindError(
                 f"같은 'DependentModel' 이미 등록되어 있다 - ({get_model_id(self._request_t)})"
             )
-        if self._request_t.tr_require is None:
-            raise BindError(
-                f"'require'가 먼저 바인드 되어야 한다. - {get_model_id(self._request_t)}"
-            )
         self._request_t._tr_model_type = "dependent_generator"
         self._dependent_cb = cb
 
