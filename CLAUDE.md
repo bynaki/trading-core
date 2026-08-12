@@ -41,22 +41,25 @@ uv run examples/main.py parallel      # 모든 예제를 공유 Domain에서 동
 
 의존성: `uv add <pkg>` / `uv add --dev <pkg>`.
 
-## 현재 브랜치 상태 (중요)
+## 현재 저장소 상태 (중요)
 
-`update/require` 브랜치는 **등록 API 리팩터링이 진행 중**이다. 작업 전에 이 상태를 먼저 확인할 것.
-아래는 2026-08-12 기준이며, 코드(`src/` · `examples/`)는 끝났고 **남은 것은 테스트와 문서뿐이다.**
+등록 API 리팩터링(`definer.py` → `binder.py`)은 **끝났고 `main`에 들어가 있다.** 작업 브랜치였던
+`update/require`는 `main`과 같은 커밋이 되어 삭제했으므로, 이제 브랜치는 `main` 하나뿐이다.
+아래는 2026-08-12 기준이며, 코드(`src/` · `examples/`)는 완료 상태이고 **남은 것은 테스트와 문서뿐이다.**
 
 - `src/trading_core/definer.py`(옛 `@generator` / `@task` / `@processor` 레지스트리)는 **삭제**되었고
-  `src/trading_core/binder.py`(`initialize()` 기반)로 대체되었다.
+  `src/trading_core/binder.py`(`initialize()` 기반)로 대체되었다. 코드에는 옛 API 참조가 하나도 없다.
 - 마이그레이션 완료: `src/trading_core/**`, `examples/ex01`~`examples/ex05`(다섯 예제 모두 실행된다).
-- **`tests/`는 통째로 비어 있다.** 옛 API에 묶인 테스트를 마이그레이션하는 대신 전부 삭제했고,
-  새 API 기준으로 처음부터 다시 쓸 예정이다. 지워진 테스트가 무엇을 덮고 있었는지는 아래
-  "테스트" 절에 남겨 뒀다. 코드는 옛 API 참조가 하나도 없다.
+- **`tests/` 디렉터리 자체가 없다.** 옛 API에 묶인 테스트를 마이그레이션하는 대신 전부 삭제했고,
+  새 API 기준으로 처음부터 다시 쓸 예정이다. 무엇을 덮고 있었는지는 아래 "테스트" 절에 남겨 뒀다.
 - `uv run ruff check` · `ruff format --check` · `pyright` **모두 클린이다**(pyright 0 errors).
-  `pytest`만 수집 대상이 없어 exit 5를 낸다.
+  단 `pyright`는 `tests` 디렉터리가 없다는 안내를 한 줄 찍고, `pytest`는 수집 대상이 없어 exit 5를 낸다.
+  둘 다 `pyproject.toml`이 아직 `tests`를 가리키기 때문이며, 테스트를 다시 쓰면 자연히 사라진다.
 - `README.md`는 옛 API(`@generator` / `.bind` / `.close` / `definer.py`)를 그대로 설명한다.
   개념 설명(공유 · fan-out · 수명 주기)은 여전히 정확하지만 **코드 예제와 API 이름은 신뢰하지 말 것**.
   `examples/ex01/README.md`도 같은 상태이고, ex02~ex05의 README는 새 API 기준이다.
+- `TODO.md`에 남은 과제와 이미 해결한 불변식의 내력이 적혀 있다. 특히 "require 콜백이 심볼에 따라
+  다른 상위 요청을 반환할 수 없다"는 제약은 현재 구조상 유효하다.
 - `playground.py`는 타입 실험용 스크래치 파일이다. 정식 예제가 아니다.
 
 ## 아키텍처
@@ -176,7 +179,7 @@ async def _(ctx: NamingAllContext): ...
 
 ## 테스트
 
-**현재 테스트가 하나도 없다.** `tests/`의 파일은 전부 삭제했고, 새 API(`initialize()` 기반 binder)
+**현재 테스트가 하나도 없다.** `tests/`는 디렉터리째 삭제했고, 새 API(`initialize()` 기반 binder)
 기준으로 처음부터 다시 작성할 계획이다. 옛 테스트를 되살리지 말 것 — 참고할 일이 있으면
 `ff64509` 이전 이력에서 꺼내 보면 된다.
 
