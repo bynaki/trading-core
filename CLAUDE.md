@@ -52,14 +52,13 @@ uv run examples/main.py parallel      # 모든 예제를 공유 Domain에서 동
   `src/trading_core/binder.py`(`initialize()` 기반)로 대체되었다.
 - 마이그레이션 완료: `src/trading_core/**`, `examples/ex01`~`examples/ex05`(다섯 예제 모두 실행된다),
   `tests/test_ex05.py`, `tests/test_model_validation.py`.
-- **아직 옛 API를 쓰는 파일**:
+- **아직 옛 API를 쓰는 파일**(전부 `tests/`다):
   - `tests/test_framework.py` — `generator` · `task` · `DefineError`를 import한다. import 자체가
     실패하므로 `uv run pytest`는 **collection 단계에서 멈춰 다른 테스트도 실행되지 않는다.**
     나머지 테스트를 보려면 `uv run pytest --ignore=tests/test_framework.py`.
   - `tests/test_ex01.py` · `test_ex02.py` · `test_ex03.py` — import는 되지만 binder를
     `gen01(request)`처럼 *컨텍스트 팩토리*로 호출하는 옛 관용구가 남아 있다. 새 API에서 그 호출은
     generate 콜백 바인딩이라 `BindError`로 실패한다. 현재 7 failed / 19 passed.
-  - `examples/loader.py` — `tc.StageDefiner`(`# type: ignore`로 가려져 있어 실행할 때만 터진다).
 - `examples/ex04`는 정식 예제로 완성됐지만 대응하는 `tests/test_ex04.py`는 아직 없다.
 - `uv run pyright`는 **30 errors, 전부 `tests/`**(`test_framework` 20, `test_ex01`~`03` 10)에서 난다.
   `src/`와 `examples/`는 클린이다. `ruff check` · `ruff format --check`는 전체 통과한다.
