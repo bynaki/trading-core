@@ -29,6 +29,12 @@ def origin_symbols(domain: Domain, req: CounterReq | DerivedReq | MappedReq) -> 
     return domain.get_origin_stage(req.get_tr_content_id()).output.symbols
 
 
+def mapped(symbols: set[str]) -> frozenset[str]:
+    """`MappedReq`의 require가 하위 심볼을 바꿔 상위에 올리는 표기."""
+
+    return frozenset(f"{s}{QUOTE_SUFFIX}" for s in symbols)
+
+
 # ===== Domain.request() =====
 
 
@@ -284,6 +290,74 @@ async def test_dependent_registers_the_union_upstream(domain: Domain):
 
     assert rec_a.symbols == {"BTC"}
     assert rec_b.symbols == {"ETH"}
+
+
+async def test_dependent_restarts_only_when_the_union_changes(domain: Domain):
+    """파생 스테이지도 심볼 합집합이 실제로 달라질 때만 재시작한다.
+
+    `test_origin_restarts_only_when_the_union_changes`와 같은 규칙을 dependent 분기에서
+    확인한다. 파생 쪽은 상위 원천까지 함께 움직이므로 두 계층의 기록을 나란히 본다.
+
+    새 구독자가 데이터를 받는지도 함께 단정한다. 조기 반환이 `set_sender()` **뒤에**
+    있어야 재시작 없이도 구독자 목록에 들어가기 때문이다. 순서가 뒤바뀌면 재시작
+    횟수는 그대로면서 새 구독자만 다음 재시작까지 굶는다. (ex06과 같은 시나리오다.)
+    """
+
+    tag = "dependent-union-restart"
+    req = MappedReq(tag=tag)
+    upstream = CounterReq(tag=tag)
+    dep_log, up_log = log_of(req), log_of(upstream)
+    rec_a, rec_b = Recorder("A"), Recorder("B")
+
+    async with domain.stage(req, rec_a) as stage_a:
+        await stage_a.update({"BTC"})
+        await rec_a.wait_for(1)
+        assert dep_log.starts == [frozenset({"BTC"})]
+        assert up_log.starts == [mapped({"BTC"})]
+
+        async with domain.stage(req, rec_b) as stage_b:
+            # 이미 합집합에 있는 심볼이므로 두 계층 모두 재시작하지 않아야 한다.
+            await stage_b.update({"BTC"})
+            await rec_b.wait_for(1)
+            assert rec_b.symbols == {"BTC"}
+            assert origin_symbols(domain, req) == {"BTC"}
+            assert origin_symbols(domain, upstream) == set(mapped({"BTC"}))
+            assert len(dep_log.starts) == 1
+            assert len(up_log.starts) == 1
+            # 재시작이 없었으니 기존 generator의 finally도 아직 돌지 않았다.
+            assert dep_log.stopped == 0
+            assert up_log.stopped == 0
+
+            # 합집합이 넓어지면 두 계층이 함께 재시작한다.
+            await stage_b.update({"BTC", "ETH"})
+            assert origin_symbols(domain, req) == {"BTC", "ETH"}
+            assert origin_symbols(domain, upstream) == set(mapped({"BTC", "ETH"}))
+            await wait_until(
+                lambda: len(dep_log.starts) == 2 and len(up_log.starts) == 2,
+                "합집합이 넓어졌는데 재시작하지 않았다.",
+            )
+            assert dep_log.last_start == frozenset({"BTC", "ETH"})
+            assert up_log.last_start == mapped({"BTC", "ETH"})
+
+        # B가 떠나 합집합이 좁아져도 재시작한다.
+        assert origin_symbols(domain, req) == {"BTC"}
+        await wait_until(
+            lambda: len(dep_log.starts) == 3 and len(up_log.starts) == 3,
+            "합집합이 좁아졌는데 재시작하지 않았다.",
+        )
+        assert dep_log.last_start == frozenset({"BTC"})
+        assert up_log.last_start == mapped({"BTC"})
+
+        # 재시작을 두 번 겪고도 A의 구독은 그대로다.
+        rec_a.clear()
+        await rec_a.wait_for(1)
+        assert rec_a.symbols == {"BTC"}
+
+    # generator 3개(최초 + 재시작 2회)가 모두 닫히고 스테이지 단위 정리는 한 번씩이다.
+    assert dep_log.stopped == 3
+    assert up_log.stopped == 3
+    assert dep_log.detached == 1
+    assert up_log.detached == 1
 
 
 async def test_dependent_request_api_delivers_mapped_symbols(domain: Domain):

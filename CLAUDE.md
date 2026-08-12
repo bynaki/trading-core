@@ -198,9 +198,10 @@ async def _(ctx: NamingAllContext): ...
 ex05가 남긴 "파생 스테이지가 상위에 등록하는 심볼은 구독자 전체의 합집합"이라는 불변식은
 `test_dependent_registers_the_union_upstream`이 덮는다(내력은 `1510812` 참고).
 
-아직 테스트가 없는 자리 하나: **파생 분기의 "합집합이 그대로면 재시작하지 않는다" 조기 반환**
-(`domain.py`의 dependent `update()`). 같은 규칙의 원천 분기만 덮여 있다. 예제 쪽에서는 ex06이
-이 경로를 지나가므로, 시나리오를 `tests/support/streams.py`의 빠른 binder로 옮기면 그대로 덮인다.
+"합집합이 그대로면 재시작하지 않는다"는 규칙은 두 분기 모두 덮여 있다. 원천 분기는
+`test_origin_restarts_only_when_the_union_changes`가, 파생 분기는
+`test_dependent_restarts_only_when_the_union_changes`가 맡는다. 후자는 ex06과 같은 시나리오이며,
+`domain.py`의 dependent 조기 반환을 지우면 이 테스트만 깨진다.
 
 테스트를 더 쓸 때 걸리는 제약:
 
