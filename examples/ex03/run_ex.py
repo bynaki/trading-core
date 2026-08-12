@@ -40,7 +40,7 @@ async def run_ex(domain: Domain) -> None:
                 print(f"symbols: {symbols}")
                 print(f"orgin.symbols: {origin.output.symbols}")
                 assert (symbols & origin.output.symbols) == symbols
-                await sleep(1)
+                await sleep(0.5)
             for j in range(i, 0, -1):
                 symbols.remove(f"{symbol_name}-{j + 1}")
                 await stage.update(symbols)
@@ -48,7 +48,7 @@ async def run_ex(domain: Domain) -> None:
                 print(f"symbols: {symbols}")
                 print(f"orgin.symbols: {origin.output.symbols}")
                 assert (symbols & origin.output.symbols) == symbols
-                await sleep(1)
+                await sleep(0.5)
 
     await gather(_("symbols01", 3), _("symbols02", 5))
     print("===== finished ex03 =====")

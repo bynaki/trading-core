@@ -63,7 +63,7 @@ async def _(ctx: PriceContext, symbols: Set[str]):
         while True:
             symbol = random.choice(tuple(symbols))
             yield PriceData(symbol=symbol, price=ctx.price(symbol))
-            await sleep(1)
+            await sleep(0.5)
     finally:
         print("Update 별로 자원을 정리할 수 있다.")
 

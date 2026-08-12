@@ -34,15 +34,15 @@ async def run_ex(domain: Domain) -> None:
 
     async with TaskGroup() as tg:
         tg.create_task(request("dog", symbols03, 1))
-        await sleep(1)
+        await sleep(0.5)
         tg.create_task(request("flower", symbols02, 10))
-        await sleep(1)
+        await sleep(0.5)
         tg.create_task(request("cat", symbols01, 5))
-        await sleep(1)
+        await sleep(0.5)
         tg.create_task(request("flower", symbols03, 3))
-        await sleep(1)
+        await sleep(0.5)
         tg.create_task(request("cat", symbols02, 3))
-        await sleep(1)
+        await sleep(0.5)
         tg.create_task(request("dog", symbols02, 7))
     print("===== finished ex02 =====")
 

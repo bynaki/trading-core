@@ -45,7 +45,7 @@ async def _(req: CountReq, symbols: set[str]):
             remainder = count % len(sym_list)
             yield CountData(symbol=sym_list[remainder], count=count)
             count += 1
-            await sleep(1)
+            await sleep(0.5)
     finally:
         print(f"Update 별로 리소스를 정리할 수 있다 - count: {count}")
 

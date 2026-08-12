@@ -105,7 +105,7 @@ async def _(ctx: NamingAllContext, symbols: set[str]):
         cat = f"{cat_names[i % len(cat_names)]}:{symbol}"
         yield NamingAllData(flower=flower, dog=dog, cat=cat, count=i + 1, symbol=symbol)
         i += 1
-        await sleep(1)
+        await sleep(0.5)
 
 
 @naming.detached
