@@ -49,14 +49,15 @@ uv run examples/main.py parallel      # 모든 예제를 공유 Domain에서 동
 
 - `src/trading_core/definer.py`(옛 `@generator` / `@task` / `@processor` 레지스트리)는 **삭제**되었고
   `src/trading_core/binder.py`(`initialize()` 기반)로 대체되었다. 코드에는 옛 API 참조가 하나도 없다.
-- 마이그레이션 완료: `src/trading_core/**`, `examples/ex01`~`examples/ex05`(다섯 예제 모두 실행된다).
+- 마이그레이션 완료: `src/trading_core/**`, `examples/ex01`~`examples/ex06`(여섯 예제 모두 실행된다).
+  ex06은 새 API 기준으로 새로 쓴 예제다(파생 스테이지의 "합집합이 그대로면 재시작하지 않는다" 검증).
 - 옛 API에 묶인 테스트는 전부 삭제했고, `tests/`는 새 API(`initialize()` 기반 binder) 기준으로
   처음부터 다시 썼다. 구성은 아래 "테스트" 절에 있다.
 - `uv run ruff check` · `ruff format --check` · `pyright` · `pytest` **모두 클린이다**
   (pyright 0 errors, 78 tests passed).
 - `README.md`는 옛 API(`@generator` / `.bind` / `.close` / `definer.py`)를 그대로 설명한다.
   개념 설명(공유 · fan-out · 수명 주기)은 여전히 정확하지만 **코드 예제와 API 이름은 신뢰하지 말 것**.
-  `examples/ex01/README.md`도 같은 상태이고, ex02~ex05의 README는 새 API 기준이다.
+  `examples/ex01/README.md`도 같은 상태이고, ex02~ex06의 README는 새 API 기준이다.
 - `TODO.md`에 남은 과제와 이미 해결한 불변식의 내력이 적혀 있다. 특히 "require 콜백이 심볼에 따라
   다른 상위 요청을 반환할 수 없다"는 제약은 현재 구조상 유효하다.
 - `playground.py`는 타입 실험용 스크래치 파일이다. 정식 예제가 아니다.
@@ -196,6 +197,10 @@ async def _(ctx: NamingAllContext): ...
 옛 테스트를 되살리지 말 것 — 참고할 일이 있으면 `ff64509` 이전 이력에서 꺼내 보면 된다.
 ex05가 남긴 "파생 스테이지가 상위에 등록하는 심볼은 구독자 전체의 합집합"이라는 불변식은
 `test_dependent_registers_the_union_upstream`이 덮는다(내력은 `1510812` 참고).
+
+아직 테스트가 없는 자리 하나: **파생 분기의 "합집합이 그대로면 재시작하지 않는다" 조기 반환**
+(`domain.py`의 dependent `update()`). 같은 규칙의 원천 분기만 덮여 있다. 예제 쪽에서는 ex06이
+이 경로를 지나가므로, 시나리오를 `tests/support/streams.py`의 빠른 binder로 옮기면 그대로 덮인다.
 
 테스트를 더 쓸 때 걸리는 제약:
 
