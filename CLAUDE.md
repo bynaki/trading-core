@@ -20,18 +20,16 @@ uv run ruff check .          # 린트
 uv run ruff format .         # 포맷 적용
 uv run ruff format --check . # 포맷 검사
 uv run pyright               # 타입 체크 (standard)
-uv run pytest                # 테스트
+uv run pytest                # 테스트 (현재 테스트가 하나도 없다 — "테스트" 절 참고)
 ```
 
-코드 변경 후 위 4개(check / format / pyright / pytest)가 모두 통과해야 한다.
-단, 현재 브랜치에서는 `pyright`와 `pytest`가 아직 깨져 있다 — 아래 "현재 브랜치 상태"를 볼 것.
-새로 만든 실패인지 원래 있던 실패인지 구분해야 한다.
+코드 변경 후 위 4개(check / format / pyright / pytest)가 모두 통과해야 한다. 지금은 앞의 셋이
+클린이고 `pytest`는 수집할 테스트가 없어 exit 5("no tests ran")를 낸다. 이 상태에서는 **예제 실행이
+사실상의 회귀 검증**이므로, `src/`를 고쳤으면 `uv run examples/main.py serial`까지 돌려 볼 것.
 
-단일 테스트 · 예제 실행:
+예제 실행:
 
 ```bash
-uv run pytest tests/test_ex02.py::test_naming_requests_build_the_same_required_origin
-uv run pytest -k "shared_origin" -s   # 예제 binder는 print 로그를 남기므로 -s가 유용
 uv run python examples/ex01/run_ex.py # 예제 파일을 직접 실행 (자체 Domain을 만든다)
 uv run examples/main.py ex01          # 예제 이름으로 실행
 uv run examples/main.py serial        # 모든 예제를 공유 Domain에서 순차 실행
@@ -46,22 +44,16 @@ uv run examples/main.py parallel      # 모든 예제를 공유 Domain에서 동
 ## 현재 브랜치 상태 (중요)
 
 `update/require` 브랜치는 **등록 API 리팩터링이 진행 중**이다. 작업 전에 이 상태를 먼저 확인할 것.
-아래는 2026-08-12 기준이며, `src/`와 `examples/`는 끝났고 **남은 부채는 `tests/`와 문서에 몰려 있다.**
+아래는 2026-08-12 기준이며, 코드(`src/` · `examples/`)는 끝났고 **남은 것은 테스트와 문서뿐이다.**
 
 - `src/trading_core/definer.py`(옛 `@generator` / `@task` / `@processor` 레지스트리)는 **삭제**되었고
   `src/trading_core/binder.py`(`initialize()` 기반)로 대체되었다.
-- 마이그레이션 완료: `src/trading_core/**`, `examples/ex01`~`examples/ex05`(다섯 예제 모두 실행된다),
-  `tests/test_ex05.py`, `tests/test_model_validation.py`.
-- **아직 옛 API를 쓰는 파일**(전부 `tests/`다):
-  - `tests/test_framework.py` — `generator` · `task` · `DefineError`를 import한다. import 자체가
-    실패하므로 `uv run pytest`는 **collection 단계에서 멈춰 다른 테스트도 실행되지 않는다.**
-    나머지 테스트를 보려면 `uv run pytest --ignore=tests/test_framework.py`.
-  - `tests/test_ex01.py` · `test_ex02.py` · `test_ex03.py` — import는 되지만 binder를
-    `gen01(request)`처럼 *컨텍스트 팩토리*로 호출하는 옛 관용구가 남아 있다. 새 API에서 그 호출은
-    generate 콜백 바인딩이라 `BindError`로 실패한다. 현재 7 failed / 19 passed.
-- `examples/ex04`는 정식 예제로 완성됐지만 대응하는 `tests/test_ex04.py`는 아직 없다.
-- `uv run pyright`는 **30 errors, 전부 `tests/`**(`test_framework` 20, `test_ex01`~`03` 10)에서 난다.
-  `src/`와 `examples/`는 클린이다. `ruff check` · `ruff format --check`는 전체 통과한다.
+- 마이그레이션 완료: `src/trading_core/**`, `examples/ex01`~`examples/ex05`(다섯 예제 모두 실행된다).
+- **`tests/`는 통째로 비어 있다.** 옛 API에 묶인 테스트를 마이그레이션하는 대신 전부 삭제했고,
+  새 API 기준으로 처음부터 다시 쓸 예정이다. 지워진 테스트가 무엇을 덮고 있었는지는 아래
+  "테스트" 절에 남겨 뒀다. 코드는 옛 API 참조가 하나도 없다.
+- `uv run ruff check` · `ruff format --check` · `pyright` **모두 클린이다**(pyright 0 errors).
+  `pytest`만 수집 대상이 없어 exit 5를 낸다.
 - `README.md`는 옛 API(`@generator` / `.bind` / `.close` / `definer.py`)를 그대로 설명한다.
   개념 설명(공유 · fan-out · 수명 주기)은 여전히 정확하지만 **코드 예제와 API 이름은 신뢰하지 말 것**.
   `examples/ex01/README.md`도 같은 상태이고, ex02~ex05의 README는 새 API 기준이다.
@@ -182,12 +174,27 @@ async def _(ctx: NamingAllContext): ...
 - 런타임 의존성은 pydantic 하나뿐이다. 새 런타임 의존성을 추가하기 전에 확인할 것.
 - 커밋 메시지는 Conventional Commits(`feat:`, `fix:`, `docs:`)를 쓴다.
 
-## 테스트 구조
+## 테스트
 
-- `tests/test_framework.py` — 프레임워크 단위 명세(모델 식별자, `SharedSender` 라우팅,
-  원천 공유·재시작 조건, `TaskManager` 취소).
-- `tests/test_model_validation.py` — 직렬화 · `validate_model` · `cast_model`.
-- `tests/test_ex01~03.py` — 예제를 실행 가능한 명세로 검증한다. **예제를 고치면 대응 테스트도 깨진다.**
-  `test_ex02.py`는 예제의 클래스 수준 컨텍스트 저장소를 autouse fixture로 비운다.
+**현재 테스트가 하나도 없다.** `tests/`의 파일은 전부 삭제했고, 새 API(`initialize()` 기반 binder)
+기준으로 처음부터 다시 작성할 계획이다. 옛 테스트를 되살리지 말 것 — 참고할 일이 있으면
+`ff64509` 이전 이력에서 꺼내 보면 된다.
+
+지워진 테스트가 덮던 범위(다시 쓸 때의 출발점):
+
+- **프레임워크 단위 명세** — 모델 식별자 3종, `SharedSender` 라우팅, 원천 공유·재시작 조건,
+  `TaskManager` 이름 기반 취소.
+- **모델 직렬화** — `validate_model` · `cast_model` 왕복.
+- **예제 기반 명세** — ex01~ex03, ex05를 실행 가능한 명세로 검증했다. ex04는 대응 테스트가 없었다.
+  특히 ex05는 "파생 스테이지가 상위에 등록하는 심볼은 구독자 전체의 합집합"이라는 불변식의
+  회귀 테스트였다(`1510812` 참고). **이 불변식은 다시 덮는 것이 좋다.**
+
+새로 쓸 때 걸리는 제약:
+
 - `asyncio_mode = "auto"`이므로 async 테스트에 `@pytest.mark.asyncio`가 필요 없다.
-- 예제 binder는 무한히 데이터를 발행하므로 테스트는 소비 개수나 이벤트로 종료를 제어한다.
+- `BindPack._binder_dict`가 **프로세스 전역**이라 같은 요청 타입을 두 번 등록하면 `BindError`가 난다.
+  예제 모듈을 import해 쓰는 테스트는 "등록은 프로세스당 한 번"이라는 전제 위에서 짜야 하고,
+  binder를 호출해 컨텍스트를 만들려 들면 그 호출이 곧 재바인딩이라 실패한다(옛 테스트가 깨진 원인).
+- 예제 binder는 무한히 데이터를 발행하므로 소비 개수나 이벤트로 종료를 제어해야 한다.
+  예제의 발행 간격은 0.5초다.
+- 예제를 고치면 대응 테스트도 함께 깨진다는 점은 그대로다.
