@@ -1,3 +1,10 @@
+"""심볼 표기가 서로 다른 두 거래소를 하나의 OHLC 모델로 정규화하는 예제.
+
+`require` 콜백이 상위 요청뿐 아니라 심볼 집합까지 변환한다. 소비자는 `"BTC"` 같은
+기초 자산만 요청하고, 원천에는 `"BTC/USD"` · `"BTC/KRW"`처럼 거래소 표기로 바뀌어
+전달된다. 어떤 원천을 쓸지도 `OHLCRequest.quote` 값에 따라 달라진다.
+"""
+
 import re
 from asyncio import sleep
 from typing import Literal
@@ -17,11 +24,17 @@ def base_of(symbol: str) -> str:
 
 
 class BinanceRequest(GenerateModel):
+    """USD 마켓 캔들을 요청하는 원천 요청. `interval`이 봉의 주기다."""
+
     interval: Literal["1m", "5m", "1h"]
 
 
 class BinanceData(DataModel):
-    """op: open, hi: high, lo: low, cl: close, vol: volume"""
+    """줄임말 필드를 쓰는 USD 마켓 캔들.
+
+    `op`: 시가, `hi`: 고가, `lo`: 저가, `cl`: 종가, `vol`: 거래량이며 `symbol`은
+    `"BTC/USD"`처럼 거래소 표기를 그대로 쓴다.
+    """
 
     op: float
     hi: float
@@ -30,6 +43,7 @@ class BinanceData(DataModel):
     vol: float
 
 
+# 주기별로 10개의 캔들을 담은 USD 마켓 모의 데이터. binder가 순환하며 발행한다.
 MOCK_BTC_USD: dict[str, list[BinanceData]] = {
     "1m": [
         BinanceData(symbol="BTC/USD", op=68120.5, hi=68240.0, lo=68090.1, cl=68205.3, vol=12.480),
@@ -111,11 +125,18 @@ MOCK_ETH_USD: dict[str, list[BinanceData]] = {
 
 @initialize
 def binance(req: BinanceRequest):
+    """요청 자체를 원천 스테이지의 공유 컨텍스트로 사용한다."""
+
     return req
 
 
 @binance
 async def _(ctx: BinanceRequest, symbols: set[str]):
+    """구독 심볼을 순환하며 요청한 주기의 USD 캔들을 0.5초 간격으로 발행한다.
+
+    모의 데이터는 주기마다 10개뿐이므로 끝에 도달하면 처음부터 다시 반복한다.
+    """
+
     while True:
         for i in range(10):
             for symbol in symbols:
@@ -125,14 +146,23 @@ async def _(ctx: BinanceRequest, symbols: set[str]):
                     yield MOCK_ETH_USD[ctx.interval][i]
                 else:
                     raise Exception(f"Unthinkable!!! - {symbol}")
-                await sleep(1)
+                await sleep(0.5)
 
 
 class UpbitRequest(GenerateModel):
+    """KRW 마켓 캔들을 요청하는 원천 요청. 지원 주기가 USD 마켓과 다르다."""
+
     interval: Literal["5m", "30m", "1h"]
 
 
 class OHLCData(DataModel):
+    """정규화된 OHLC 출력 모델.
+
+    KRW 원천은 이 모델을 그대로 발행하고(`symbol`은 `"BTC/KRW"` 표기),
+    `OHLCRequest` binder는 심볼만 기초 자산으로 바꾸어 소비자에게 전달한다.
+    USD 원천의 `BinanceData`도 이 모델로 변환된다.
+    """
+
     open: float
     high: float
     low: float
@@ -140,6 +170,7 @@ class OHLCData(DataModel):
     volume: float
 
 
+# 주기별로 10개의 캔들을 담은 KRW 마켓 모의 데이터. 필드 이름이 이미 정규화되어 있다.
 MOCK_BTC_KRW: dict[str, list[OHLCData]] = {
     "5m": [
         OHLCData(
@@ -491,11 +522,18 @@ MOCK_ETH_KRW: dict[str, list[OHLCData]] = {
 
 @initialize
 def upbit(req: UpbitRequest):
+    """요청 자체를 원천 스테이지의 공유 컨텍스트로 사용한다."""
+
     return req
 
 
 @upbit
 async def _(ctx: UpbitRequest, symbols: set[str]):
+    """구독 심볼을 순환하며 요청한 주기의 KRW 캔들을 0.5초 간격으로 발행한다.
+
+    모의 데이터는 주기마다 10개뿐이므로 끝에 도달하면 처음부터 다시 반복한다.
+    """
+
     while True:
         for i in range(10):
             for symbol in symbols:
@@ -505,16 +543,28 @@ async def _(ctx: UpbitRequest, symbols: set[str]):
                     yield MOCK_ETH_KRW[ctx.interval][i]
                 else:
                     raise Exception(f"Unthinkable!!! - {symbol}")
-                await sleep(1)
+                await sleep(0.5)
 
 
 class OHLCRequest(DependentModel):
+    """견적 통화와 주기만 지정하면 거래소를 가리지 않는 파생 요청.
+
+    `interval`은 두 원천이 함께 지원하는 주기로 제한한다.
+    """
+
     quote: Literal["usd", "krw"]
     interval: Literal["5m", "1h"]
 
 
 @OHLCRequest.require
-def gen(req: OHLCRequest, symbols: set[str]):
+def ohlc_requirement(req: OHLCRequest, symbols: set[str]):
+    """견적 통화에 맞는 상위 요청과 그 거래소 표기의 심볼 집합을 함께 만든다.
+
+    심볼 집합까지 받는 형태의 require 콜백이라 상위 원천에는 `"BTC"`가 아니라
+    `"BTC/USD"` · `"BTC/KRW"`가 전달된다. 상위 요청이 무엇인지도 `quote` 값에 따라
+    달라지므로 하나의 파생 요청이 두 원천 중 하나로 라우팅된다.
+    """
+
     if req.quote == "usd":
         return BinanceRequest(interval=req.interval), {f"{s}/USD" for s in symbols}
     elif req.quote == "krw":
@@ -525,11 +575,20 @@ def gen(req: OHLCRequest, symbols: set[str]):
 
 @initialize
 def ohlc(req: OHLCRequest) -> OHLCRequest:
+    """요청 자체를 파생 스테이지의 공유 컨텍스트로 사용한다."""
+
     return req
 
 
 @ohlc
-async def binder(ctx: OHLCRequest, symbols: set[str], recv: Receiver):
+async def _(ctx: OHLCRequest, symbols: set[str], recv: Receiver):
+    """상위 원천 데이터를 받아 `OHLCData`와 기초 자산 심볼로 정규화해 발행한다.
+
+    `symbol`을 다시 기초 자산으로 되돌리는 것이 중요하다. `SharedSender`는 발행된
+    데이터의 `symbol`로 구독자를 찾으므로, 거래소 표기 그대로 내보내면 어떤
+    구독자에게도 전달되지 않는다.
+    """
+
     while True:
         data = await recv()
         if ctx.quote == "usd":
