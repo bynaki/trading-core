@@ -20,12 +20,12 @@ uv run ruff check .          # 린트
 uv run ruff format .         # 포맷 적용
 uv run ruff format --check . # 포맷 검사
 uv run pyright               # 타입 체크 (standard)
-uv run pytest                # 테스트 (현재 테스트가 하나도 없다 — "테스트" 절 참고)
+uv run pytest                # 테스트 (약 0.3초 — "테스트" 절 참고)
 ```
 
-코드 변경 후 위 4개(check / format / pyright / pytest)가 모두 통과해야 한다. 지금은 앞의 셋이
-클린이고 `pytest`는 수집할 테스트가 없어 exit 5("no tests ran")를 낸다. 이 상태에서는 **예제 실행이
-사실상의 회귀 검증**이므로, `src/`를 고쳤으면 `uv run examples/main.py serial`까지 돌려 볼 것.
+코드 변경 후 위 4개(check / format / pyright / pytest)가 모두 통과해야 한다. 넷 다 클린이다.
+테스트가 프레임워크 불변식을 덮지만 예제까지 함께 도는 것은 아니므로, `src/`를 고쳤으면
+`uv run examples/main.py serial`도 한 번 돌려 볼 것.
 
 예제 실행:
 
@@ -45,16 +45,15 @@ uv run examples/main.py parallel      # 모든 예제를 공유 Domain에서 동
 
 등록 API 리팩터링(`definer.py` → `binder.py`)은 **끝났고 `main`에 들어가 있다.** 작업 브랜치였던
 `update/require`는 `main`과 같은 커밋이 되어 삭제했으므로, 이제 브랜치는 `main` 하나뿐이다.
-아래는 2026-08-12 기준이며, 코드(`src/` · `examples/`)는 완료 상태이고 **남은 것은 테스트와 문서뿐이다.**
+아래는 2026-08-12 기준이며, 코드(`src/` · `examples/`)와 테스트는 완료 상태이고 **남은 것은 문서뿐이다.**
 
 - `src/trading_core/definer.py`(옛 `@generator` / `@task` / `@processor` 레지스트리)는 **삭제**되었고
   `src/trading_core/binder.py`(`initialize()` 기반)로 대체되었다. 코드에는 옛 API 참조가 하나도 없다.
 - 마이그레이션 완료: `src/trading_core/**`, `examples/ex01`~`examples/ex05`(다섯 예제 모두 실행된다).
-- **`tests/` 디렉터리 자체가 없다.** 옛 API에 묶인 테스트를 마이그레이션하는 대신 전부 삭제했고,
-  새 API 기준으로 처음부터 다시 쓸 예정이다. 무엇을 덮고 있었는지는 아래 "테스트" 절에 남겨 뒀다.
-- `uv run ruff check` · `ruff format --check` · `pyright` **모두 클린이다**(pyright 0 errors).
-  단 `pyright`는 `tests` 디렉터리가 없다는 안내를 한 줄 찍고, `pytest`는 수집 대상이 없어 exit 5를 낸다.
-  둘 다 `pyproject.toml`이 아직 `tests`를 가리키기 때문이며, 테스트를 다시 쓰면 자연히 사라진다.
+- 옛 API에 묶인 테스트는 전부 삭제했고, `tests/`는 새 API(`initialize()` 기반 binder) 기준으로
+  처음부터 다시 썼다. 구성은 아래 "테스트" 절에 있다.
+- `uv run ruff check` · `ruff format --check` · `pyright` · `pytest` **모두 클린이다**
+  (pyright 0 errors, 78 tests passed).
 - `README.md`는 옛 API(`@generator` / `.bind` / `.close` / `definer.py`)를 그대로 설명한다.
   개념 설명(공유 · fan-out · 수명 주기)은 여전히 정확하지만 **코드 예제와 API 이름은 신뢰하지 말 것**.
   `examples/ex01/README.md`도 같은 상태이고, ex02~ex05의 README는 새 API 기준이다.
@@ -179,25 +178,33 @@ async def _(ctx: NamingAllContext): ...
 
 ## 테스트
 
-**현재 테스트가 하나도 없다.** `tests/`는 디렉터리째 삭제했고, 새 API(`initialize()` 기반 binder)
-기준으로 처음부터 다시 작성할 계획이다. 옛 테스트를 되살리지 말 것 — 참고할 일이 있으면
-`ff64509` 이전 이력에서 꺼내 보면 된다.
+테스트는 예제를 import하지 않는다. 예제는 발행 간격이 0.5초라 느리고, 예제를 고치면 테스트가
+같이 깨지기 때문이다. 대신 `tests/support/streams.py`에 **테스트 전용 요청·binder**를 두고
+발행 간격을 0.01초로 잡았다.
 
-지워진 테스트가 덮던 범위(다시 쓸 때의 출발점):
+| 파일 | 덮는 범위 |
+| --- | --- |
+| `tests/support/streams.py` | 테스트 전용 모델·binder(원천 · 파생 · 심볼 변환 파생)와 스테이지 사건 기록 |
+| `tests/support/harness.py` | `Recorder`(Sender 구현), `wait_until()` |
+| `tests/conftest.py` | `domain` 픽스처(시작 → 테스트 → `stop()`) |
+| `tests/test_model.py` | 식별자 3종, content_id 캐시 무효화, `validate_model`·`cast_model` 왕복, `Sequence` |
+| `tests/test_helper.py` | digest/id, `TaskManager` 이름 점유·취소·재사용·실패 콜백 |
+| `tests/test_binder.py` | `initialize()` 추론과 거부 규칙, require 두 형태, 전역 레지스트리 |
+| `tests/test_transport.py` | `TransmitQueue`, `SharedSender` 라우팅·교체·해제 |
+| `tests/test_domain.py` | content_id 단위 공유, 심볼 합집합, 재시작 조건, 두 정리 지점, 의존 스트림 |
 
-- **프레임워크 단위 명세** — 모델 식별자 3종, `SharedSender` 라우팅, 원천 공유·재시작 조건,
-  `TaskManager` 이름 기반 취소.
-- **모델 직렬화** — `validate_model` · `cast_model` 왕복.
-- **예제 기반 명세** — ex01~ex03, ex05를 실행 가능한 명세로 검증했다. ex04는 대응 테스트가 없었다.
-  특히 ex05는 "파생 스테이지가 상위에 등록하는 심볼은 구독자 전체의 합집합"이라는 불변식의
-  회귀 테스트였다(`1510812` 참고). **이 불변식은 다시 덮는 것이 좋다.**
+옛 테스트를 되살리지 말 것 — 참고할 일이 있으면 `ff64509` 이전 이력에서 꺼내 보면 된다.
+ex05가 남긴 "파생 스테이지가 상위에 등록하는 심볼은 구독자 전체의 합집합"이라는 불변식은
+`test_dependent_registers_the_union_upstream`이 덮는다(내력은 `1510812` 참고).
 
-새로 쓸 때 걸리는 제약:
+테스트를 더 쓸 때 걸리는 제약:
 
 - `asyncio_mode = "auto"`이므로 async 테스트에 `@pytest.mark.asyncio`가 필요 없다.
 - `BindPack._binder_dict`가 **프로세스 전역**이라 같은 요청 타입을 두 번 등록하면 `BindError`가 난다.
-  예제 모듈을 import해 쓰는 테스트는 "등록은 프로세스당 한 번"이라는 전제 위에서 짜야 하고,
-  binder를 호출해 컨텍스트를 만들려 들면 그 호출이 곧 재바인딩이라 실패한다(옛 테스트가 깨진 원인).
-- 예제 binder는 무한히 데이터를 발행하므로 소비 개수나 이벤트로 종료를 제어해야 한다.
-  예제의 발행 간격은 0.5초다.
-- 예제를 고치면 대응 테스트도 함께 깨진다는 점은 그대로다.
+  그래서 binder는 모듈 수준에서 한 번만 등록하고, 테스트끼리는 요청의 `tag` 필드 값을 달리해
+  **서로 다른 content_id = 서로 다른 스테이지**로 격리한다. 같은 `tag`를 두 테스트가 쓰면 스테이지와
+  기록을 공유하게 된다.
+- generator (재)시작은 `TaskManager.submit()`을 거치므로 `update()` 직후에는 아직 실행되지 않았다.
+  "재시작했다"는 `wait_until()`로 기다려 확인하고, 동기적으로 단정할 수 있는 것은 `SharedSender`에
+  등록된 심볼(`origin.output.symbols`)뿐이다.
+- binder는 무한히 데이터를 발행하므로 소비 개수나 `Recorder.wait_for()`로 종료를 제어해야 한다.
