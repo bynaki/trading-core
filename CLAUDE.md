@@ -24,33 +24,49 @@ uv run pytest                # 테스트
 ```
 
 코드 변경 후 위 4개(check / format / pyright / pytest)가 모두 통과해야 한다.
+단, 현재 브랜치에서는 `pyright`와 `pytest`가 아직 깨져 있다 — 아래 "현재 브랜치 상태"를 볼 것.
+새로 만든 실패인지 원래 있던 실패인지 구분해야 한다.
 
 단일 테스트 · 예제 실행:
 
 ```bash
 uv run pytest tests/test_ex02.py::test_naming_requests_build_the_same_required_origin
 uv run pytest -k "shared_origin" -s   # 예제 binder는 print 로그를 남기므로 -s가 유용
-uv run python examples/ex01/run_ex.py # 예제 개별 실행 (ex01~ex03)
-uv run python examples/main.py        # 세 예제를 하나의 Domain에서 동시 실행
+uv run python examples/ex01/run_ex.py # 예제 파일을 직접 실행 (자체 Domain을 만든다)
+uv run examples/main.py ex01          # 예제 이름으로 실행
+uv run examples/main.py serial        # 모든 예제를 공유 Domain에서 순차 실행
+uv run examples/main.py parallel      # 모든 예제를 공유 Domain에서 동시 실행
 ```
+
+`examples/main.py`는 `examples/*/run_ex.py`를 글롭으로 찾아 예제 목록을 만든다. `run_ex(domain)`
+코루틴을 가진 디렉터리를 추가하면 인자 목록(`--help`)과 `serial`/`parallel`에 자동으로 포함된다.
 
 의존성: `uv add <pkg>` / `uv add --dev <pkg>`.
 
 ## 현재 브랜치 상태 (중요)
 
 `update/require` 브랜치는 **등록 API 리팩터링이 진행 중**이다. 작업 전에 이 상태를 먼저 확인할 것.
+아래는 2026-08-12 기준이며, `src/`와 `examples/`는 끝났고 **남은 부채는 `tests/`와 문서에 몰려 있다.**
 
 - `src/trading_core/definer.py`(옛 `@generator` / `@task` / `@processor` 레지스트리)는 **삭제**되었고
   `src/trading_core/binder.py`(`initialize()` 기반)로 대체되었다.
-- 마이그레이션 완료: `src/trading_core/**`, `examples/ex01`, `examples/ex02`.
-- **아직 옛 API를 쓰는 파일**: `tests/test_framework.py`(`generator`, `DefineError`),
-  `tests/test_ex03.py` · `examples/ex03/ex03.py`(`generator`), `examples/loader.py`(`StageDefiner`).
-  이 때문에 `uv run pytest`는 현재 collection 단계에서 ImportError로 실패하고, `uv run pyright`도
-  tests/examples에서 에러를 낸다. `src/`는 pyright 클린이다.
+- 마이그레이션 완료: `src/trading_core/**`, `examples/ex01`~`examples/ex05`(다섯 예제 모두 실행된다),
+  `tests/test_ex05.py`, `tests/test_model_validation.py`.
+- **아직 옛 API를 쓰는 파일**:
+  - `tests/test_framework.py` — `generator` · `task` · `DefineError`를 import한다. import 자체가
+    실패하므로 `uv run pytest`는 **collection 단계에서 멈춰 다른 테스트도 실행되지 않는다.**
+    나머지 테스트를 보려면 `uv run pytest --ignore=tests/test_framework.py`.
+  - `tests/test_ex01.py` · `test_ex02.py` · `test_ex03.py` — import는 되지만 binder를
+    `gen01(request)`처럼 *컨텍스트 팩토리*로 호출하는 옛 관용구가 남아 있다. 새 API에서 그 호출은
+    generate 콜백 바인딩이라 `BindError`로 실패한다. 현재 7 failed / 19 passed.
+  - `examples/loader.py` — `tc.StageDefiner`(`# type: ignore`로 가려져 있어 실행할 때만 터진다).
+- `examples/ex04`는 정식 예제로 완성됐지만 대응하는 `tests/test_ex04.py`는 아직 없다.
+- `uv run pyright`는 **30 errors, 전부 `tests/`**(`test_framework` 20, `test_ex01`~`03` 10)에서 난다.
+  `src/`와 `examples/`는 클린이다. `ruff check` · `ruff format --check`는 전체 통과한다.
 - `README.md`는 옛 API(`@generator` / `.bind` / `.close` / `definer.py`)를 그대로 설명한다.
   개념 설명(공유 · fan-out · 수명 주기)은 여전히 정확하지만 **코드 예제와 API 이름은 신뢰하지 말 것**.
-- `examples/ex04/ex04.py`는 미완성 스케치(존재하지 않는 `require` 심볼을 import),
-  `playground.py`는 타입 실험용 스크래치 파일이다. 둘 다 정식 예제가 아니다.
+  `examples/ex01/README.md`도 같은 상태이고, ex02~ex05의 README는 새 API 기준이다.
+- `playground.py`는 타입 실험용 스크래치 파일이다. 정식 예제가 아니다.
 
 ## 아키텍처
 
