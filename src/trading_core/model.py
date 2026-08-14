@@ -218,8 +218,8 @@ def get_model_generated_origin(data: TrBaseModel | DataDump) -> str:
 # Tput = TypeVar("Tput", bound="DataModel")
 
 
-class Runnable(Protocol):
-    async def invoke(self, input: DataModel) -> DataModel | None: ...
+class Runnable[Tin: DataModel, Tout: DataModel](Protocol):
+    async def invoke(self, input: Tin) -> Tout | None: ...
 
 
 class Sequence[Treq: BaseReqModel]:

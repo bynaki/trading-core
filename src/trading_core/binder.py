@@ -18,7 +18,7 @@ type InitCb[Tctx, Treq: BaseReqModel] = Callable[[Treq], Tctx]
 type GenerateCb[Tctx] = Callable[[Tctx, set[str]], AsyncGenerator[DataModel]]
 type DependentCb[Tctx] = Callable[[Tctx, set[str], Receiver], AsyncGenerator[DataModel]]
 type DetachCb[Tctx] = Callable[[Tctx], Coroutine[Any, Any, None]]
-type BindCb[Tctx] = Callable[[Tctx, str], Coroutine[Any, Any, Sequence]]
+type BindCb[Tctx] = Callable[[Tctx, str], AsyncGenerator[Sequence]]
 type UnbindCb[Tctx] = Callable[[Tctx, str], Coroutine[Any, Any, None]]
 type RequireCb[Tctx] = Callable[[Tctx], Coroutine[Any, Any, Sequence]]
 
@@ -188,7 +188,6 @@ def initialize[Tctx, Treq: BaseReqModel](cb: InitCb[Tctx, Treq]) -> object:
     if not params:
         raise BindError(f"'init' 콜백은 요청 인자가 하나 있어야 한다. - {cb.__qualname__}")
     type_hints = get_type_hints(cb)
-    print(type_hints)
     first = params[0]
     if first not in type_hints:
         raise BindError(
