@@ -11,12 +11,11 @@ from trading_core.binder import (
     initialize,
 )
 from trading_core.domain import (
-    ClosedConnection,
     Domain,
     Stage,
     TransmitQueue,
 )
-from trading_core.exceptions import BindError, DomainError
+from trading_core.exceptions import BindError, ClosedConnection, DomainError
 from trading_core.model import (
     BaseReqModel,
     DataModel,

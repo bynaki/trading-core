@@ -378,6 +378,24 @@ class DataModel(TrBaseModel):
     symbol: str = ""
 
 
+def is_generate_model(req: BaseReqModel) -> bool:
+    if isinstance(req, GenerateModel) and get_model_type(req) == "generator":
+        return True
+    return False
+
+
+def is_dependent_model(req: BaseReqModel) -> bool:
+    if isinstance(req, DependentModel) and get_model_type(req) == "dependent_generator":
+        return True
+    return False
+
+
+def is_request_model(req: BaseReqModel) -> bool:
+    if isinstance(req, RequestModel) and get_model_type(req) == "request":
+        return True
+    return False
+
+
 def validate_dump(json_data: str | bytes | Mapping[str, Any]) -> DataDump:
     try:
         raw: Any = dict(json_data) if isinstance(json_data, Mapping) else json.loads(json_data)
