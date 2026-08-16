@@ -255,10 +255,10 @@ def req_binder(req: ReqReq) -> ReqReq:
 
 
 @req_binder
-async def _(ctx: ReqReq, symbol: str) -> Sequence:
+async def _(ctx: ReqReq, symbol: str):
     """심볼 하나를 시퀀스로 묶는 bind 콜백."""
 
-    return ctx(symbol)
+    yield ctx(symbol)
 
 
 def test_initialize_returns_request_binder():
@@ -276,8 +276,8 @@ def test_request_binding_marks_model_type():
 def test_request_binder_collects_bind_and_require_callbacks():
     """bind · require 콜백은 여러 개를 모아 둔다."""
 
-    async def another_bind(ctx: ReqReq, symbol: str) -> Sequence:
-        return ctx(symbol)
+    async def another_bind(ctx: ReqReq, symbol: str):
+        yield ctx(symbol)
 
     async def requirement(ctx: ReqReq) -> Sequence:
         return ctx("BTC")
