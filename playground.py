@@ -1,23 +1,47 @@
-import re
-
-_SYMBOL_PATTERN = re.compile(r"^([A-Z0-9]+)/([A-Z0-9]+)$")
+from typing import Protocol
 
 
-def base_of(symbol: str) -> str:
-    """`"BTC/USD"`처럼 `기초/견적` 형식인 심볼에서 기초 자산(`"BTC"`)만 뽑아낸다."""
-    matched = _SYMBOL_PATTERN.match(symbol)
-    if matched is None:
-        raise ValueError(f"'{symbol}'은(는) '기초/견적' 형식의 심볼이 아니다")
-    return matched.group(1)
+class A: ...
 
 
-def quote_of(symbol: str) -> str:
-    """`"BTC/USD"`처럼 `기초/견적` 형식인 심볼에서 견적 자산(`"USDT"`)만 뽑아낸다."""
-    matched = _SYMBOL_PATTERN.match(symbol)
-    if matched is None:
-        raise ValueError(f"'{symbol}'은(는) '기초/견적' 형식의 심볼이 아니다")
-    return matched.group(2)
+class B: ...
 
 
-print(base_of("BTC/USD"))
-print(quote_of("BTC/USD"))
+a01 = A()
+b01 = B()
+a02 = A()
+b02 = B()
+
+
+s = set()
+s.add((a01, b01))
+s.add((a01, b01))
+s.add((a02, b01))
+s.add((a02, b02))
+
+print(f"len: {len(s)}")
+
+for i in s:
+    print(i)
+
+
+s.remove((a01, b01))
+
+
+print(f"len: {len(s)}")
+
+for i in s:
+    print(i)
+
+
+class SenderProto(Protocol):
+    async def __call__(self, data: str): ...
+
+
+async def sender(data: str): ...
+
+
+def aaa(sender: SenderProto): ...
+
+
+aaa(sender)
