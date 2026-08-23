@@ -48,10 +48,10 @@ class TrAnnotation(TypedDict):
 
 
 type ModelType = Literal[
-    "base", "unregistered", "generator", "dependent_generator", "request", "data"
+    "base", "unregistered", "generator", "dependent_generator", "instanter", "data"
 ]
 
-_model_type_list = ("base", "unregistered", "generator", "dependent_generator", "request", "data")
+_model_type_list = ("base", "unregistered", "generator", "dependent_generator", "instanter", "data")
 
 
 class TrBaseModel(BaseModel):
@@ -246,6 +246,8 @@ class Sequence[Treq: BaseReqModel]:
             data = await step.invoke(data)
             if not data:
                 return
+        # if not data.get_tr_req_content_id():
+        #     data._tr_req_content_id = self._req.get_tr_content_id()
         return data
         # if not self._joins:
         #     raise SequenceError("'Join'할게 없으면 아웃풋 데이터는 'None'이어야 한다.")
@@ -267,6 +269,9 @@ class Sequence[Treq: BaseReqModel]:
         #     errors.append(SequenceError("더이상 'Join'할게 없다."))
         # if errors:
         #     raise ExceptionGroup("Sequence Error!!", errors)
+
+    def _set_req_symbol(self, req_symbol: str):
+        self._req_symbol = req_symbol
 
 
 class RequireSequence[Treq: BaseReqModel](Sequence):
@@ -376,6 +381,10 @@ class RequestModel(BaseReqModel): ...
 class DataModel(TrBaseModel):
     _tr_model_type: ClassVar[ModelType] = "data"
     symbol: str = ""
+    _tr_req_content_id: str = ""
+
+    def get_tr_req_content_id(self) -> str:
+        return self._tr_req_content_id
 
 
 def is_generate_model(req: BaseReqModel) -> bool:
@@ -390,8 +399,8 @@ def is_dependent_model(req: BaseReqModel) -> bool:
     return False
 
 
-def is_request_model(req: BaseReqModel) -> bool:
-    if isinstance(req, RequestModel) and get_model_type(req) == "request":
+def is_instant_model(req: BaseReqModel) -> bool:
+    if isinstance(req, RequestModel) and get_model_type(req) == "instanter":
         return True
     return False
 
@@ -458,14 +467,14 @@ def cast_model[T: TrBaseModel](data: TrBaseModel, cast_t: type[T]) -> T:
 
 # close 되었다면 ClosedConnection 예외를 발생해야 한다.
 # type Sender = Callable[[DataModel], Coroutine[Any, Any, None]]
-type Sender[T: DataModel] = Callable[[T], Coroutine[Any, Any, None]]
+type Sender[T] = Callable[[T], Coroutine[Any, Any, None]]
 # class Sender(Protocol):
 #     async def __call__(self, data: DataModel) -> None: ...
 
 # async def close(self) -> None: ...
 
 
-type Receiver = Callable[[], Coroutine[Any, Any, DataModel]]
+type Receiver[T] = Callable[[], Coroutine[Any, Any, T]]
 # class Receiver(Protocol):
 #     async def __call__(self) -> DataModel: ...
 
