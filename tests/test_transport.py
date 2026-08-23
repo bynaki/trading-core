@@ -1,9 +1,9 @@
-"""`domain.py`의 전달 계층 명세 — `TransmitQueue`와 `SharedSender`."""
+"""`domain.py`의 전달 계층 명세 — `TransmitQueue`와 `SendRouter`."""
 
 import pytest
 
 from trading_core import ClosedConnection, TransmitQueue
-from trading_core.domain import SharedSender
+from trading_core.domain import SendRouter
 
 from .support.harness import Recorder
 from .support.streams import CounterData
@@ -39,13 +39,13 @@ async def test_transmit_queue_reports_closed_connection():
         await transq.recv()
 
 
-# ===== SharedSender =====
+# ===== SendRouter =====
 
 
 async def test_shared_sender_unions_symbols_and_routes_by_symbol():
     """심볼 합집합을 노출하고, 데이터는 그 심볼을 구독한 쪽에만 간다."""
 
-    shared = SharedSender()
+    shared = SendRouter()
     a, b = Recorder("A"), Recorder("B")
     shared.set_sender(a, {"BTC"})
     shared.set_sender(b, {"BTC", "ETH"})
@@ -62,7 +62,7 @@ async def test_shared_sender_unions_symbols_and_routes_by_symbol():
 async def test_shared_sender_replaces_previous_registration():
     """같은 `Sender`를 다시 등록하면 심볼이 추가가 아니라 교체된다."""
 
-    shared = SharedSender()
+    shared = SendRouter()
     recorder = Recorder()
     shared.set_sender(recorder, {"BTC"})
     shared.set_sender(recorder, {"ETH"})
@@ -75,7 +75,7 @@ async def test_shared_sender_replaces_previous_registration():
 async def test_shared_sender_drops_empty_registration():
     """빈 집합으로 등록하면 구독이 사라진다."""
 
-    shared = SharedSender()
+    shared = SendRouter()
     recorder = Recorder()
     shared.set_sender(recorder, {"BTC"})
     shared.set_sender(recorder, set())

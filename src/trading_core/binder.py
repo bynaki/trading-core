@@ -1,4 +1,5 @@
 from collections.abc import AsyncGenerator, Callable, Coroutine
+from contextlib import aclosing
 from inspect import signature
 from typing import Any, Protocol, get_type_hints, overload
 
@@ -68,9 +69,10 @@ class BindPack[Tctx, Treq: BaseReqModel]:
         req_content_id = req.get_tr_content_id()
 
         async def wrap(ctx: Tctx, symbols: set[str]):
-            async for data in cb(ctx, symbols):
-                data._tr_req_content_id = req_content_id
-                yield data
+            async with aclosing(cb(ctx, symbols)) as agen:
+                async for data in agen:
+                    data._tr_req_content_id = req_content_id
+                    yield data
 
         return wrap
 
@@ -91,9 +93,10 @@ class BindPack[Tctx, Treq: BaseReqModel]:
         req_content_id = req.get_tr_content_id()
 
         async def wrap(ctx: Tctx, symbols: set[str], recv: Receiver) -> AsyncGenerator[DataModel]:
-            async for data in cb(ctx, symbols, recv):
-                data._tr_req_content_id = req_content_id
-                yield data
+            async with aclosing(cb(ctx, symbols, recv)) as agen:
+                async for data in agen:
+                    data._tr_req_content_id = req_content_id
+                    yield data
 
         return wrap
 

@@ -103,7 +103,7 @@ def test_bind_pack_is_registered_by_model_id():
     pack = BindPack.get_binder(get_model_id(GenReq))
     assert pack is not None
     assert pack.request_t is GenReq
-    assert pack.get_generate_cb() is not None
+    assert pack.get_generate_cb(GenReq(tag="probe")) is not None
     assert pack.get_detach_cb() is not None
 
 
@@ -268,26 +268,30 @@ def test_initialize_returns_request_binder():
 
 
 def test_request_binding_marks_model_type():
-    """bind 콜백을 붙이면 요청 타입이 "request"가 된다."""
+    """bind 콜백을 붙이면 요청 타입이 "instanter"가 된다."""
 
-    assert get_model_type(ReqReq) == "request"
+    assert get_model_type(ReqReq) == "instanter"
 
 
-def test_request_binder_collects_bind_and_require_callbacks():
-    """bind · require 콜백은 여러 개를 모아 둔다."""
+def test_rebinding_bind_callback_is_rejected():
+    """같은 요청 타입에 bind 콜백을 두 번 바인드할 수 없다."""
 
     async def another_bind(ctx: ReqReq, symbol: str):
         yield ctx(symbol)
 
-    async def requirement(ctx: ReqReq) -> Sequence:
-        return ctx("BTC")
+    with pytest.raises(BindError):
+        req_binder.bind(another_bind)
 
-    req_binder.bind(another_bind).require(requirement)
 
-    pack = BindPack.get_binder(get_model_id(ReqReq))
-    assert pack is not None
-    assert len(pack.get_bind_cb_set()) == 2
-    assert len(pack.get_require_cb_set()) == 1
+def test_require_callback_can_only_be_set_once():
+    """require 콜백은 하나만 등록할 수 있다."""
+
+    async def requirement(ctx: ReqReq) -> AsyncGenerator[Sequence]:
+        yield ctx("BTC")
+
+    req_binder.require(requirement)
+    with pytest.raises(BindError):
+        req_binder.require(requirement)
 
 
 def test_unbind_callback_can_only_be_set_once():
