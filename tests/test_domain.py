@@ -12,12 +12,16 @@ from trading_core import Domain, DomainError, Stage, cast_model, get_model_inst_
 
 from .support.harness import Recorder, wait_until
 from .support.streams import (
+    BEACON_SYMBOL,
     QUOTE_SUFFIX,
+    BeaconReq,
     CounterData,
     CounterReq,
     DerivedData,
     DerivedReq,
     MappedReq,
+    SwingData,
+    SwingReq,
     UnboundReq,
     log_of,
 )
@@ -375,6 +379,72 @@ async def test_dependent_request_api_delivers_mapped_symbols(domain: Domain):
     assert {d.symbol for d in received} == {"BTC"}
     with pytest.raises(KeyError):
         domain.get_origin_stage(CounterReq(tag="dependent-request").get_tr_content_id())
+
+
+# ===== instanter 스트림 =====
+
+
+async def test_instant_stage_maps_symbols_to_the_upstream(domain: Domain):
+    """요청형 스테이지가 상위에 올리는 심볼은 **시퀀스가 요구한 상위 표기**다.
+
+    소비자가 구독한 하위 심볼(`BTC`)을 그대로 상위에 올리면 안 된다. 상·하위 표기가
+    같은 요청이면 이 회귀가 드러나지 않으므로, 여기서는 일부러 표기가 다른
+    `SwingReq`(`BTC` → `BTC/USD`)를 쓴다.
+    """
+
+    tag = "instant-mapping"
+    req = SwingReq(tag=tag)
+    upstream = CounterReq(tag=tag)
+    up_log = log_of(upstream)
+    recorder = Recorder()
+
+    async with domain.stage(req, recorder) as stage:
+        await stage.update({"BTC"})
+        assert origin_symbols(domain, upstream) == {f"BTC{QUOTE_SUFFIX}"}
+        await recorder.wait_for(2)
+
+    assert up_log.last_start == frozenset({f"BTC{QUOTE_SUFFIX}"})
+    assert recorder.symbols == {"BTC"}  # 소비자는 하위 표기로 받는다
+    assert isinstance(recorder.received[0], SwingData)
+
+
+async def test_instant_stage_cleans_up_the_upstream(domain: Domain):
+    """요청형 스테이지를 빠져나오면 그것이 만든 상위 원천도 함께 정리된다."""
+
+    tag = "instant-cleanup"
+    req = SwingReq(tag=tag)
+    upstream = CounterReq(tag=tag)
+    log, up_log = log_of(req), log_of(upstream)
+    recorder = Recorder()
+
+    async with domain.stage(req, recorder) as stage:
+        await stage.update({"BTC"})
+        await recorder.wait_for(1)
+
+    assert log.detached == 1
+    assert up_log.detached == 1
+    with pytest.raises(KeyError):
+        domain.get_origin_stage(upstream.get_tr_content_id())
+
+
+async def test_instant_require_subscribes_alongside_symbols(domain: Domain):
+    """require 시퀀스는 구독 심볼과 **나란히** 상위에 올라간다.
+
+    require는 `"__require__"`라는 센티널 슬롯을 쓴다. 이 센티널이 실제 심볼로 새면
+    binder가 `"__require__"`를 심볼인 양 받고 같은 이름의 태스크가 두 번 제출된다.
+    """
+
+    tag = "instant-require"
+    req = BeaconReq(tag=tag)
+    upstream = CounterReq(tag=tag)
+    recorder = Recorder()
+
+    async with domain.stage(req, recorder) as stage:
+        await stage.update({"BTC"})
+        assert origin_symbols(domain, upstream) == {f"BTC{QUOTE_SUFFIX}", BEACON_SYMBOL}
+        await recorder.wait_for(2)
+
+    assert recorder.symbols == {"BTC", BEACON_SYMBOL}
 
 
 # ===== 생성 가드 =====

@@ -270,9 +270,6 @@ class Sequence[Treq: BaseReqModel]:
         # if errors:
         #     raise ExceptionGroup("Sequence Error!!", errors)
 
-    def _set_req_symbol(self, req_symbol: str):
-        self._req_symbol = req_symbol
-
 
 class RequireSequence[Treq: BaseReqModel](Sequence):
     def __init__(self, require: Treq, symbol: str):

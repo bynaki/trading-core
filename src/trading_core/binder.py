@@ -108,14 +108,7 @@ class BindPack[Tctx, Treq: BaseReqModel]:
                 f"같은 'RequestModel' 이미 등록되어 있다 - ({get_model_id(self._request_t)})"
             )
         self._request_t._tr_model_type = "instanter"
-
-        # type BindCb[Tctx] = Callable[[Tctx, str], AsyncGenerator[Sequence]]
-        async def wrap(ctx: Tctx, symbol: str):
-            async for seq in cb(ctx, symbol):
-                seq._set_req_symbol(symbol)
-                yield seq
-
-        self._bind_cb = wrap
+        self._bind_cb = cb
 
     def get_bind_cb(self) -> BindCb[Tctx] | None:
         return self._bind_cb
@@ -135,13 +128,7 @@ class BindPack[Tctx, Treq: BaseReqModel]:
             raise BindError(f"'RequestModel'이 아니다. - {get_model_id(self._request_t)}")
         if self._require_cb is not None:
             raise BindError(f"'require'가 이미 바인드 되었다. - {get_model_id(self._request_t)}")
-
-        async def wrap(ctx: Tctx):
-            async for seq in cb(ctx):
-                seq._set_req_symbol("__require__")
-                yield seq
-
-        self._require_cb = wrap
+        self._require_cb = cb
 
     def get_require_cb(self) -> RequireCb[Tctx] | None:
         return self._require_cb

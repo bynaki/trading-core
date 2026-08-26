@@ -116,23 +116,25 @@ class Registered(NamedTuple):
 
 class SendRouterSet:
     def __init__(self):
-        self._registered_set: set[Registered] = set()
+        # `Registered`는 요청 모델을 품고 있어 해시할 수 없다. content_id를 키로 쓴다.
+        self._registered_dict: dict[str, Registered] = {}
 
     def add_sender(self, req: BaseReqModel, sender: SequenceSender):
-        for reg in self._registered_set:
-            if req.get_tr_content_id() == reg.content_id:
-                reg.router.add(sender, sender.sequence.symbol)
-                return
-        router = SendRouter()
-        router.add(sender, sender.sequence.symbol)
-        self._registered_set.add(Registered(req.get_tr_content_id(), req, router))
+        content_id = req.get_tr_content_id()
+        reg = self._registered_dict.get(content_id)
+        if reg is None:
+            reg = Registered(content_id, req, SendRouter())
+            self._registered_dict[content_id] = reg
+        reg.router.add(sender, sender.sequence.symbol)
 
     def clear(self):
-        for reg in self._registered_set:
+        # 라우터만 비우고 `Registered`는 남긴다. content_id마다 같은 `SendRouter`
+        # 객체가 유지되어야 스테이지에 등록된 `Sender`와 동일성이 깨지지 않는다.
+        for reg in self._registered_dict.values():
             reg.router.clear()
 
     def __call__(self):
-        yield from self._registered_set
+        yield from self._registered_dict.values()
 
 
 class _StageCreationKey:
@@ -410,7 +412,7 @@ class Domain:
         id = self._generate_id(req)
         stage = Stage(
             _STAGE_CREATION_KEY,
-            id=self._generate_id(req),
+            id=id,
             request=req,
             output=output,
         )
@@ -459,7 +461,9 @@ class Domain:
                         f"{id}:__require__",
                     )
                     req_cb = None
-                new_symbols = current_symbols - (active_symbols & current_symbols)
+                # `current_symbols`는 센티널을 지우지 않으려고 만든 것이라 여기에
+                # 쓰면 안 된다. `"__require__"` 슬롯은 위 `req_cb` 분기만 만든다.
+                new_symbols = symbols - active_symbols
                 if new_symbols:
                     for symbol in new_symbols:
                         transq = TransmitQueue[tuple[DataModel, Sequence]]()
@@ -480,6 +484,7 @@ class Domain:
                     for ss in sss:
                         router_set.add_sender(ss.sequence.require, ss)
                 current_stage_set: set[Stage] = set()
+                updating: list[tuple[Stage, set[str]]] = []
                 for reg in router_set():
                     req_stage: Stage | None = None
                     for act in active_stage_set:
@@ -493,13 +498,16 @@ class Domain:
                     if req_stage is None:
                         req_stage = self._define_stage(reg.require, reg.router)
                     current_stage_set.add(req_stage)
+                    # 상위에 등록할 심볼은 시퀀스가 요구한 상위 표기(`seq.symbol`)다.
+                    # 이 스테이지가 받은 하위 심볼이 아니다.
+                    updating.append((req_stage, reg.router.symbols))
                 detaching_stage_set = active_stage_set - current_stage_set
                 async with TaskGroup() as tg:
                     for detaching in detaching_stage_set:
                         tg.create_task(detaching.detach())
                 async with TaskGroup() as tg:
-                    for req_stage in current_stage_set:
-                        tg.create_task(req_stage.update(symbols))
+                    for req_stage, req_symbols in updating:
+                        tg.create_task(req_stage.update(req_symbols))
                 active_stage_set = current_stage_set
 
         async def detach():

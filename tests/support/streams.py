@@ -19,6 +19,8 @@ from trading_core import (
     DependentModel,
     GenerateModel,
     Receiver,
+    RequestModel,
+    Runnable,
     cast_model,
     initialize,
 )
@@ -211,6 +213,92 @@ async def _(ctx: StreamContext):
     """마지막 파생 구독이 사라질 때 호출된다."""
 
     ctx.log.detached += 1
+
+
+# ===== instanter(RequestModel) 스트림 =====
+#
+# `RequestModel`은 심볼마다 `Sequence`를 만들어 상위 원천에 붙이는 요청이다. 상위에
+# 등록되는 심볼은 시퀀스가 요구한 표기(`BTC/USD`)이고 소비자가 받는 심볼은 하위
+# 표기(`BTC`)다. 이 둘을 **일부러 다르게** 두어야 상·하위를 뒤바꾼 회귀가 드러난다.
+
+
+class SwingReq(RequestModel):
+    """하위 `BTC`를 상위 `BTC/USD`로 바꿔 요구하는 요청형 모델."""
+
+    tag: str
+
+
+class SwingData(DataModel):
+    """상위 카운트를 하위 표기로 옮겨 담은 출력."""
+
+    count: int
+
+
+class Relay(Runnable):
+    """상위 `CounterData`를 하위 표기의 `SwingData`로 옮긴다."""
+
+    def __init__(self, symbol: str) -> None:
+        self.symbol = symbol
+
+    async def invoke(self, input: CounterData) -> SwingData | None:
+        return SwingData(symbol=self.symbol, count=input.count)
+
+
+@initialize
+def swing(req: SwingReq) -> StreamContext:
+    """요청형 스테이지의 공유 컨텍스트를 만든다."""
+
+    return StreamContext(req)
+
+
+@swing
+async def _(ctx: StreamContext, symbol: str):
+    """심볼 하나를 상위 표기로 바꿔 구독하는 시퀀스를 낸다."""
+
+    tag = cast_model(ctx.req, SwingReq).tag
+    yield CounterReq(tag=tag)(f"{symbol}{QUOTE_SUFFIX}") | Relay(symbol)
+
+
+@swing.detached
+async def _(ctx: StreamContext):
+    """마지막 구독이 사라질 때 호출된다."""
+
+    ctx.log.detached += 1
+
+
+# ===== require까지 쓰는 instanter 스트림 =====
+
+BEACON_SYMBOL = "BEACON/USD"
+"""`BeaconReq`가 구독 심볼과 무관하게 항상 상위에 올리는 심볼."""
+
+
+class BeaconReq(RequestModel):
+    """구독 심볼과 별개로 상위 심볼 하나를 늘 요구하는 요청형 모델."""
+
+    tag: str
+
+
+@initialize
+def beacon(req: BeaconReq) -> StreamContext:
+    """require를 쓰는 요청형 스테이지의 공유 컨텍스트를 만든다."""
+
+    return StreamContext(req)
+
+
+@beacon
+async def _(ctx: StreamContext, symbol: str):
+    """`SwingReq`와 같은 방식으로 심볼별 시퀀스를 낸다."""
+
+    tag = cast_model(ctx.req, BeaconReq).tag
+    yield CounterReq(tag=tag)(f"{symbol}{QUOTE_SUFFIX}") | Relay(symbol)
+
+
+@beacon.require
+async def _(ctx: StreamContext):
+    """구독 심볼이 무엇이든 항상 붙는 시퀀스."""
+
+    tag = cast_model(ctx.req, BeaconReq).tag
+    yield CounterReq(tag=tag)(BEACON_SYMBOL) | Relay(BEACON_SYMBOL)
 
 
 # ===== binder가 없는 요청 =====
