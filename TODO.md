@@ -21,4 +21,11 @@
 
 5. `SendRouterSet.clear()`가 센더가 다 빠진 `Registered`를 남기므로, 해당 스테이지가 `active_stage_set`에 계속 남는다(`detaching_stage_set`에 걸리지 않는다). 지금은 `update(set())`을 받아 원천 구독이 정상 해제되고 나중 `detach()`도 무해한 no-op이라 실동작 문제는 없지만, 스테이지 수명이 실제 구독보다 길다는 점은 남아 있다.
 
-6. instanter 스테이지의 `detach()`가 남아 있는 심볼에 대해 `unbind_cb`를 부르지 않는다. `update()`로 심볼이 빠질 때는 부르므로, 정리 경로 둘이 서로 다르게 동작한다.
+6. [해결] instanter 스테이지의 `detach()`가 남아 있는 심볼에 대해 `unbind_cb`를 부르지 않아, 심볼을 들고 종료하는 보통의 경우에 심볼별 자원이 새던 문제.
+   심볼 단위 정리를 `unbind_symbols()` 지역 헬퍼로 뽑아 `update()`의 삭제 경로와 `detach()`가 함께 쓰도록 했다. 이제 계약은 "`bind_cb`로 연 심볼은 어느 경로로 닫히든 `unbind_cb` 한 번"이다. `update()`가 이미 `transq_dict`에서 pop 하므로 이중 호출은 구조적으로 막힌다.
+   `"__require__"`는 `req_cb`가 만든 슬롯이라 bind된 적이 없으므로 제외한다. `update()` 쪽도 센티널이 `del_symbols`에 들어가지 않으므로 두 경로가 여기서도 같다.
+   재현·검증: tests/test_domain.py의 `test_instant_detach_unbinds_remaining_symbols`(정리 누락), `test_instant_unbinds_each_symbol_exactly_once`(짝 계약), `test_instant_require_slot_is_not_unbound`(센티널 제외).
+
+7. `transq.shutdown()`은 `_task_sequence`를 비동기로 끝내므로 `f"{id}:{symbol}"` 태스크 이름이 곧바로 풀리지 않는다. 심볼을 뺐다가 바로 다시 넣으면 이름 충돌로 `TaskManagerError`가 날 수 있다. `TaskManager.cancel_by_name()`은 release 이벤트로 이름 해제까지 기다리는데 이 경로에는 그런 대기가 없다.
+
+8. 사용자 콜백이 예외를 던질 때의 정책이 없다. `unbind_cb`·`detach_cb`가 `TaskGroup` 안에서 던지면 `detach()`가 중간에 끊겨 상위 스테이지가 안 내려가고 `stage.update`/`detach` 교체도 안 된다. generate 콜백의 `finally`도 같은 노출을 갖는다. 1번과 같은 주제이므로 함께 정해야 한다.

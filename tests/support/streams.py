@@ -49,6 +49,9 @@ class StreamLog:
     detached: int = 0
     """detach 콜백이 불린 횟수(스테이지 단위 정리)."""
 
+    unbound: list[str] = field(default_factory=list)
+    """unbind 콜백이 닫은 심볼. 이중 호출이 잡히도록 집합이 아니라 목록이다."""
+
     @property
     def last_start(self) -> frozenset[str]:
         """가장 최근 (재)시작이 받은 심볼 합집합."""
@@ -259,6 +262,13 @@ async def _(ctx: StreamContext, symbol: str):
     yield CounterReq(tag=tag)(f"{symbol}{QUOTE_SUFFIX}") | Relay(symbol)
 
 
+@swing.unbind
+async def _(ctx: StreamContext, symbol: str):
+    """심볼 하나의 구독이 닫힐 때 호출된다."""
+
+    ctx.log.unbound.append(symbol)
+
+
 @swing.detached
 async def _(ctx: StreamContext):
     """마지막 구독이 사라질 때 호출된다."""
@@ -299,6 +309,13 @@ async def _(ctx: StreamContext):
 
     tag = cast_model(ctx.req, BeaconReq).tag
     yield CounterReq(tag=tag)(BEACON_SYMBOL) | Relay(BEACON_SYMBOL)
+
+
+@beacon.unbind
+async def _(ctx: StreamContext, symbol: str):
+    """심볼 하나의 구독이 닫힐 때 호출된다."""
+
+    ctx.log.unbound.append(symbol)
 
 
 # ===== binder가 없는 요청 =====

@@ -447,6 +447,60 @@ async def test_instant_require_subscribes_alongside_symbols(domain: Domain):
     assert recorder.symbols == {"BTC", BEACON_SYMBOL}
 
 
+async def test_instant_detach_unbinds_remaining_symbols(domain: Domain):
+    """스테이지를 빠져나올 때 남아 있던 심볼도 `unbind`로 닫힌다.
+
+    `update()`로 심볼이 빠지는 경로만 `unbind`를 부르고 `detach()`는 부르지 않으면,
+    심볼을 들고 종료하는 보통의 경우에 심볼별 자원이 샌다.
+    """
+
+    tag = "instant-detach-unbind"
+    req = SwingReq(tag=tag)
+    log = log_of(req)
+    recorder = Recorder()
+
+    async with domain.stage(req, recorder) as stage:
+        await stage.update({"BTC", "ETH"})
+        await recorder.wait_for(2)
+
+    assert sorted(log.unbound) == ["BTC", "ETH"]
+    assert log.detached == 1
+
+
+async def test_instant_unbinds_each_symbol_exactly_once(domain: Domain):
+    """`bind`한 심볼은 어느 정리 경로로 닫히든 `unbind`가 정확히 한 번이다."""
+
+    tag = "instant-unbind-once"
+    req = SwingReq(tag=tag)
+    log = log_of(req)
+    recorder = Recorder()
+
+    async with domain.stage(req, recorder) as stage:
+        await stage.update({"BTC", "ETH"})
+        await recorder.wait_for(2)
+
+        await stage.update({"ETH"})  # BTC만 빠진다
+        assert log.unbound == ["BTC"]
+
+    # 남아 있던 ETH가 종료 시점에 닫히고, 이미 닫힌 BTC가 또 닫히지는 않는다.
+    assert sorted(log.unbound) == ["BTC", "ETH"]
+
+
+async def test_instant_require_slot_is_not_unbound(domain: Domain):
+    """require 슬롯은 `bind`된 적이 없으므로 `unbind`도 하지 않는다."""
+
+    tag = "instant-require-unbind"
+    req = BeaconReq(tag=tag)
+    log = log_of(req)
+    recorder = Recorder()
+
+    async with domain.stage(req, recorder) as stage:
+        await stage.update({"BTC"})
+        await recorder.wait_for(2)
+
+    assert log.unbound == ["BTC"]
+
+
 # ===== 생성 가드 =====
 
 

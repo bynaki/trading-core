@@ -431,21 +431,28 @@ class Domain:
         active_stage_set: set[Stage] = set()
         update_lock = Lock()
 
+        async def unbind_symbols(target: set[str]) -> None:
+            """슬롯을 닫고 심볼별 정리 콜백을 부른다. `update()`와 `detach()`가 함께 쓴다.
+
+            `bind_cb`로 연 심볼은 어느 경로로 닫히든 `unbind_cb` 한 번으로 짝을 맞춘다.
+            """
+
+            if not target:
+                return
+            for s in target:
+                transq_dict.pop(s).shutdown()
+                seq_sender_dict.pop(s)
+            if unbind_cb:
+                async with TaskGroup() as tg:
+                    for s in target:
+                        tg.create_task(unbind_cb(ctx, s))
+
         async def update(symbols: set[str]):
             nonlocal req_cb, active_stage_set
             async with update_lock:
                 active_symbols: set[str] = set(transq_dict.keys())
                 current_symbols: set[str] = symbols | {"__require__"}
-                del_symbols = active_symbols - current_symbols
-                if del_symbols:
-                    for ds in del_symbols:
-                        transq_dict[ds].shutdown()
-                        transq_dict.pop(ds)
-                        seq_sender_dict.pop(ds)
-                    if unbind_cb:
-                        async with TaskGroup() as tg:
-                            for s in del_symbols:
-                                tg.create_task(unbind_cb(ctx, s))
+                await unbind_symbols(active_symbols - current_symbols)
                 if req_cb:
                     transq = TransmitQueue[tuple[DataModel, Sequence]]()
                     transq_dict["__require__"] = transq
@@ -511,8 +518,13 @@ class Domain:
                 active_stage_set = current_stage_set
 
         async def detach():
-            for tq in transq_dict.values():
+            # `bind_cb`로 연 슬롯은 모두 짝을 맞춰 닫는다. `"__require__"`는 `req_cb`가
+            # 만든 슬롯이라 bind된 적이 없으므로 제외한다.
+            await unbind_symbols(set(transq_dict) - {"__require__"})
+            for tq in transq_dict.values():  # 남은 것은 `"__require__"` 슬롯뿐이다
                 tq.shutdown()
+            transq_dict.clear()
+            seq_sender_dict.clear()
             async with TaskGroup() as tg:
                 for req_stage in active_stage_set:
                     tg.create_task(req_stage.detach())
