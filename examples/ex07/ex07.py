@@ -14,7 +14,6 @@ ex01~ex06의 요청은 "심볼 집합 하나 → generator 하나"였다. `Reque
 `"BTC"`로 받는다. 이 변환을 시퀀스가 담당한다.
 """
 
-import re
 from asyncio import sleep
 from typing import Literal
 
@@ -34,24 +33,6 @@ INIT_PRICE_DICT: dict[str, float] = {
 """원천이 발행을 시작할 가격. 견적 통화별로 따로 둔다."""
 
 type QuoteType = Literal["USD", "KRW"]
-
-_SYMBOL_PATTERN = re.compile(r"^([A-Z0-9]+)/([A-Z0-9]+)$")
-
-
-def base_of(symbol: str) -> str:
-    """`"BTC/USD"`처럼 `기초/견적` 형식인 심볼에서 기초 자산(`"BTC"`)만 뽑아낸다."""
-    matched = _SYMBOL_PATTERN.match(symbol)
-    if matched is None:
-        raise ValueError(f"'{symbol}'은(는) '기초/견적' 형식의 심볼이 아니다")
-    return matched.group(1)
-
-
-def quote_of(symbol: str) -> str:
-    """`"BTC/USD"`처럼 `기초/견적` 형식인 심볼에서 견적 자산(`"USD"`)만 뽑아낸다."""
-    matched = _SYMBOL_PATTERN.match(symbol)
-    if matched is None:
-        raise ValueError(f"'{symbol}'은(는) '기초/견적' 형식의 심볼이 아니다")
-    return matched.group(2)
 
 
 class TickReq(GenerateModel):
@@ -114,7 +95,6 @@ class SwingCtx(BaseModel):
     """요청형 스테이지가 공유하는 컨텍스트."""
 
     quote: QuoteType
-    symbols: set[str] = set()
 
 
 @initialize

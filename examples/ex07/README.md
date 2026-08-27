@@ -98,7 +98,6 @@ symbol=XRP quote=USD price=302.0 swing=1.0
   보내게 된다. 슬롯이 `update()`로 빠지든 스테이지가 닫히든 `unbind`는 심볼당 한 번이다.
 - `require`를 쓰면 구독 심볼과 무관하게 늘 붙는 시퀀스를 하나 더 둘 수 있다(하트비트
   채널 같은 것). 이 예제는 쓰지 않는다.
-- `base_of()`·`quote_of()`와 `SwingCtx.symbols`는 현재 쓰이지 않는다.
 
 ## 어디를 검증하는가
 
