@@ -600,7 +600,7 @@ async def _(ctx: OHLCRequest, symbols: set[str], recv: Receiver):
 
     - **모델**: 어느 원천에 붙었는지는 `ctx.quote`가 알고 있으므로, require가 원천을
       고른 것과 같은 기준으로 `cast_model()` 대상을 고른다.
-    - **심볼**: `base_of()`로 기초 자산으로 되돌린다. `SharedSender`는 발행된 데이터의
+    - **심볼**: `base_of()`로 기초 자산으로 되돌린다. `SendRouter`는 발행된 데이터의
       `symbol`로 구독자를 찾으므로, 거래소 표기 그대로 내보내면 어떤 구독자에게도
       전달되지 않는다. 오류 없이 조용히 사라진다.
     """

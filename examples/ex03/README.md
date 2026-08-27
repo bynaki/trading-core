@@ -56,13 +56,13 @@ async with domain.stage(req, sender) as stage:
 - `domain.get_origin_stage(content_id).output.symbols`에 저장된 전체 합집합
 
 개별 심볼 집합이 원천 합집합에 포함된다는 assertion으로 공유 상태를 확인한다.
-`SharedSender`는 원천에서 무작위로 선택된 심볼의 데이터를 그 심볼을 구독한 sender에만
+`SendRouter`는 원천에서 무작위로 선택된 심볼의 데이터를 그 심볼을 구독한 sender에만
 전달한다.
 
 ## 정리 시점
 
 - binder의 `finally`는 심볼 합집합이 바뀌어 업데이트가 재시작될 때마다 실행된다.
-- `@price.close`는 마지막 스테이지가 닫혀 전체 심볼 합집합이 비었을 때 실행된다.
+- `@price.detached`는 마지막 스테이지가 닫혀 전체 심볼 합집합이 비었을 때 실행된다.
 - `async with domain.stage(...)`를 벗어나면 해당 sender의 구독은 자동으로 제거된다.
 
 빈 합집합에서는 binder를 실행하지 않으므로 `random.choice()`에 빈 시퀀스가 전달되지

@@ -95,7 +95,7 @@ def ohlc_requirement(req: OHLCRequest, symbols: set[str]):
 | 하위 → 상위 | require 콜백 | `{"BTC"}` → `{"BTC/USD"}`로 바꿔 원천에 등록 |
 | 상위 → 하위 | binder의 `base_of()` | `"BTC/USD"` → `"BTC"`로 되돌려 발행 |
 
-**역변환을 빠뜨리면 데이터가 사라진다.** `SharedSender`는 발행된 데이터의 `symbol`로
+**역변환을 빠뜨리면 데이터가 사라진다.** `SendRouter`는 발행된 데이터의 `symbol`로
 구독자를 찾으므로, `"BTC/USD"`인 채로 내보내면 `{"BTC"}`를 구독한 소비자에게 전달되지
 않는다. 예외도 나지 않는다.
 

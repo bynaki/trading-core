@@ -37,7 +37,7 @@
 | 3단계 | B 구독 해제, A만 남음 | `{BTC/USD}` |
 
 두 구독자의 요청은 `PriceRequest(quote="usd")`로 같다. `content_id`가 같으니 하나의
-파생 스테이지를 공유하고, 심볼은 `SharedSender`가 합집합으로 관리한다.
+파생 스테이지를 공유하고, 심볼은 `SendRouter`가 합집합으로 관리한다.
 
 ## 실행
 
@@ -106,7 +106,7 @@ async def update(sender: Sender, symbols: set[str]):
 가는데, 상위 원천에는 그 시점 update의 심볼만 변환한 `req_symbols`가 갔다.
 
 게다가 상위 원천에 등록하는 `Sender`는 이 파생 스테이지의 `transq` **하나뿐**이다.
-`SharedSender.set_sender()`는 같은 sender의 이전 등록을 지우고 새로 넣으므로, 두 번째
+`SendRouter.set_sender()`는 같은 sender의 이전 등록을 지우고 새로 넣으므로, 두 번째
 update의 `req_symbols`가 첫 번째 것을 통째로 덮어썼다. 구독자별로 쌓이지 않는다.
 
 증상은 두 가지였다.

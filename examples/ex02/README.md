@@ -16,15 +16,19 @@
 `NamingReq`는 다음과 같이 필요한 원천 요청을 선언한다.
 
 ```python
-@require(NamingReq)
-def naming_requirement(req: NamingReq) -> RequestModel:
+@NamingReq.require                       # 상위 요청을 선언한다
+def naming_requirement(req: NamingReq) -> origin.NamingAllReq:
     return origin.NamingAllReq()
 
 
-@naming_requirement
+@initialize                              # 첫 인자 어노테이션으로 요청 타입을 추론한다
 def naming(req: NamingReq) -> NamingContext:
     return NamingContext(req=req)
 ```
+
+`require`는 요청 타입의 **클래스 메서드**이고 `initialize`와는 별개다. 여기서는 요청만
+받아 상위 요청을 돌려주는 형태를 쓰는데, 심볼까지 변환하려면 `(req, symbols)`를 받는
+형태를 쓴다(ex04·ex05·ex06).
 
 `Domain`은 `NamingReq` 스테이지를 만들 때 `tr_require`를 확인한다. 필요한
 `NamingAllReq` 원천 스테이지를 만들거나 기존 스테이지를 재사용하고, 원천의 출력을
@@ -72,12 +76,12 @@ binder가 재시작되면 다시 1부터 시작한다.
 ## 수명 주기와 주의점
 
 - `NamingAllContext`와 `NamingContext`는 클래스 수준 딕셔너리에 요청을 보관하여
-  같은 `content_id`의 컨텍스트가 중복 생성되는지 드러낸다. `@naming.close`에서
+  같은 `content_id`의 컨텍스트가 중복 생성되는지 드러낸다. `@naming.detached`에서
   반드시 `detach()`하여 제거한다.
 - 파생 binder에는 의존 원천과 연결된 `Receiver`가 필요하다. 연결 없이 실행되면
   예외를 발생시켜 잘못된 구성을 즉시 알린다.
 - 원천 binder는 계속 데이터를 발행하므로 소비자는 필요한 시점에 반복을 중단해야 한다.
-- 심볼별 라우팅은 `SharedSender`가 담당한다. 원천이 합집합의 데이터를 만들더라도
+- 심볼별 라우팅은 `SendRouter`가 담당한다. 원천이 합집합의 데이터를 만들더라도
   각 구독자는 자신이 등록한 심볼의 데이터만 받는다.
 
 ## 실행

@@ -34,7 +34,7 @@ def set_phase(phase: str) -> None:
 class Recorder:
     """단계별 수신 건수를 세는 `Sender`.
 
-    `Domain.stage()`에 넘기면 파생 스테이지의 `SharedSender`가 이 인스턴스를 구독자로
+    `Domain.stage()`에 넘기면 파생 스테이지의 `SendRouter`가 이 인스턴스를 구독자로
     등록하고, 구독한 심볼의 데이터만 fan-out한다.
     """
 
