@@ -50,15 +50,16 @@ uv run examples/main.py parallel      # 모든 예제를 공유 Domain에서 동
 - 등록 API 리팩터링(`definer.py` → `binder.py`)은 끝났고 `main`에 들어가 있다. `definer.py`
   (옛 `@generator` / `@task` / `@processor` 레지스트리)는 **삭제**되었고 코드에 옛 API 참조는 없다.
 - `uv run ruff check` · `ruff format --check` · `pyright` · `pytest` **모두 클린이다**
-  (pyright 0 errors, 86 tests passed). `examples/main.py serial`도 ex01~ex07 전부 완주한다.
-- 예제는 `examples/ex01`~`examples/ex07` 일곱 개다. ex06은 파생 스테이지의 "합집합이 그대로면
-  재시작하지 않는다"를, ex07은 instanter 경로를 다룬다(instanter를 쓰는 유일한 예제).
+  (pyright 0 errors, 87 tests passed). `examples/main.py serial`도 ex01~ex08 전부 완주한다.
+- 예제는 `examples/ex01`~`examples/ex08` 여덟 개다. ex06은 파생 스테이지의 "합집합이 그대로면
+  재시작하지 않는다"를, ex07·ex08은 instanter 경로를 다룬다. ex08은 요청형 스테이지가
+  content_id로 공유되지 **않는다**는 것을 원천의 공유와 나란히 보인다.
 - 문서 상태:
   - `README.md`는 **의도적으로 얇다.** 프로젝트 소개 · 설치 · 예제 실행법 · 범위와 한계만 두고
     **코드 예제와 API 이름을 넣지 않는다.** API가 아직 자리를 잡는 중이라 문서가 곧 낡기
     때문이고, 사용법은 실행되는 `examples/`가 담당한다(낡으면 바로 깨지므로 썩지 않는다).
     기능을 추가했다고 README에 API 설명을 다시 채워 넣지 말 것.
-  - `examples/ex01`~`ex07`의 README와 코드 docstring은 모두 현행 API 기준이다. 예제를 고치면
+  - `examples/ex01`~`ex08`의 README와 코드 docstring은 모두 현행 API 기준이다. 예제를 고치면
     같은 디렉터리의 README도 함께 고칠 것 — 지금은 어긋난 곳이 없다.
 - `TODO.md`에 남은 과제와 이미 해결한 불변식의 내력이 번호 순으로 적혀 있다. 특히 "require 콜백이
   심볼에 따라 다른 상위 요청을 반환할 수 없다"(2번)는 제약은 현재 구조상 유효하다.
@@ -266,6 +267,11 @@ instanter 경로는 `test_domain.py`의 `instanter 스트림` 절이 덮는다. 
 `test_instant_unbinds_each_symbol_exactly_once`가, 센티널 취급은
 `test_instant_require_slot_is_not_unbound`가 맡는다. 이 셋은 상·하위 표기가 **다른** 요청
 (`SwingReq`: `BTC` → `BTC/USD`)을 쓰기 때문에 성립한다 — 같은 표기로 바꾸면 못 잡는다.
+
+"content_id가 같아도 요청형 스테이지는 공유되지 않는다"는 ex08과 같은 시나리오인
+`test_equal_instant_requests_do_not_share_a_stage`가 맡는다. 원천 쪽 짝인
+`test_equal_requests_share_one_origin_stage`와 나란히 읽으면 공유의 경계가 보인다.
+`_define_stage()`에서 instanter를 content_id로 캐시하도록 바꾸면 이 테스트만 깨진다.
 
 테스트를 더 쓸 때 걸리는 제약:
 

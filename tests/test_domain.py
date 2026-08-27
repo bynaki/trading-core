@@ -501,6 +501,45 @@ async def test_instant_require_slot_is_not_unbound(domain: Domain):
     assert log.unbound == ["BTC"]
 
 
+async def test_equal_instant_requests_do_not_share_a_stage(domain: Domain):
+    """내용이 같은 요청형 모델은 **공유되지 않는다** — content_id가 같아도 별개다.
+
+    원천·파생은 content_id 단위로 스테이지와 컨텍스트를 공유하지만
+    (`test_equal_requests_share_one_origin_stage`), `_define_inst_stage()`는
+    `_origin_stage_dict`를 보지도 채우지도 않는다. 요청마다 스테이지가 생기고 init
+    콜백이 다시 불린다. 공유의 경계는 그 아래 상위 원천에 있다.
+    """
+
+    tag = "instant-no-share"
+    req_a, req_b = SwingReq(tag=tag), SwingReq(tag=tag)
+    assert get_model_inst_id(req_a) != get_model_inst_id(req_b)
+    assert req_a.get_tr_content_id() == req_b.get_tr_content_id()
+    upstream = CounterReq(tag=tag)
+    log, up_log = log_of(req_a), log_of(upstream)  # content_id가 같으니 기록은 하나로 모인다
+    rec_a, rec_b = Recorder("A"), Recorder("B")
+
+    async with domain.stage(req_a, rec_a) as stage_a, domain.stage(req_b, rec_b) as stage_b:
+        await stage_a.update({"BTC"})
+        await stage_b.update({"BTC"})  # 같은 심볼이어도 슬롯은 스테이지마다 따로 열린다
+        with pytest.raises(KeyError):  # 요청형은 공유 레지스트리에 없다
+            domain.get_origin_stage(req_a.get_tr_content_id())
+        assert log.inits == 2  # 요청마다 컨텍스트가 새로 만들어진다
+        assert up_log.inits == 1  # 상위 원천은 여전히 하나를 공유한다
+        assert origin_symbols(domain, upstream) == {f"BTC{QUOTE_SUFFIX}"}
+        await rec_a.wait_for(2)
+        await rec_b.wait_for(2)
+
+    # 두 소비자가 같은 상위 generator의 출력을 각자의 슬롯으로 받는다.
+    assert rec_a.symbols == {"BTC"}
+    assert rec_b.symbols == {"BTC"}
+    # 합집합이 그대로이므로 두 번째 구독이 상위를 재시작시키지 않는다.
+    assert up_log.starts == [frozenset({f"BTC{QUOTE_SUFFIX}"})]
+    # 슬롯도 컨텍스트도 스테이지 소유이므로 정리도 스테이지마다 한 번씩이다.
+    assert log.unbound == ["BTC", "BTC"]
+    assert log.detached == 2
+    assert up_log.detached == 1
+
+
 # ===== 생성 가드 =====
 
 
