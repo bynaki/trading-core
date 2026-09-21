@@ -237,6 +237,10 @@ async def _(ctx: SwingCtx):
 - ruff: line-length 100, rules `E,F,I,UP,B`. pyright `standard`, `src`/`tests`/`examples` 포함.
 - 런타임 의존성은 pydantic 하나뿐이다. 새 런타임 의존성을 추가하기 전에 확인할 것.
 - 커밋 메시지는 Conventional Commits(`feat:`, `fix:`, `docs:`)를 쓴다.
+- **커밋하기 전에 검증하고, 사용자에게 묻는다.** 먼저 "명령" 절의 4개(check / format / pyright /
+  pytest)를 돌리고 `src/`를 고쳤으면 `examples/main.py serial`까지 돌린다. 그 결과와 커밋할 변경
+  내용(파일·메시지)을 보여 주고 사용자가 승인한 뒤에만 커밋한다. 작업 계획이 승인되었어도 커밋
+  승인은 따로 받는다. push도 마찬가지다.
 - `async for x in cb(...): yield x` 형태로 async generator를 감쌀 때는 `contextlib.aclosing`으로
   감쌀 것. 그러지 않으면 바깥을 `aclose()`해도 **안쪽 generator의 `finally`가 돌지 않는다.**
 
