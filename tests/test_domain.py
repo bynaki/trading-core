@@ -10,7 +10,7 @@ import pytest
 
 from trading_core import Domain, DomainError, Stage, cast_model, get_model_inst_id
 
-from .support.harness import Recorder, wait_until
+from .support.harness import BlockingRecorder, Recorder, wait_until
 from .support.streams import (
     BEACON_SYMBOL,
     QUOTE_SUFFIX,
@@ -484,6 +484,33 @@ async def test_instant_unbinds_each_symbol_exactly_once(domain: Domain):
 
     # 남아 있던 ETH가 종료 시점에 닫히고, 이미 닫힌 BTC가 또 닫히지는 않는다.
     assert sorted(log.unbound) == ["BTC", "ETH"]
+
+
+async def test_instant_symbol_can_be_resubscribed_right_away(domain: Domain):
+    """뺀 심볼을 곧바로 다시 넣어도 슬롯이 새로 열린다.
+
+    슬롯 태스크 이름은 `{id}:{symbol}`이다. 슬롯을 닫을 때 큐만 닫고 태스크가 끝나기를
+    기다리지 않으면, 소비자가 느려 태스크가 전송에 묶여 있는 동안 이름이 점유된 채
+    남아 같은 심볼의 재구독이 `TaskManagerError`로 실패한다.
+    """
+
+    tag = "instant-resubscribe"
+    req = SwingReq(tag=tag)
+    log = log_of(req)
+    recorder = BlockingRecorder()
+
+    async with domain.stage(req, recorder) as stage:
+        await stage.update({"BTC"})
+        await recorder.wait_for(1)  # 슬롯 태스크가 전송에 묶였다
+
+        await stage.update(set())
+        await stage.update({"BTC"})  # 옛 슬롯 태스크의 이름이 남아 있으면 여기서 실패한다
+        recorder.release()
+        recorder.clear()
+        await recorder.wait_for(1)
+
+    assert recorder.symbols == {"BTC"}
+    assert log.unbound == ["BTC", "BTC"]
 
 
 async def test_instant_require_slot_is_not_unbound(domain: Domain):

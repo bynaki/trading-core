@@ -49,7 +49,7 @@ uv run examples/main.py parallel      # 모든 예제를 공유 Domain에서 동
 - 등록 API 리팩터링(`definer.py` → `binder.py`)은 끝났고 `main`에 들어가 있다. `definer.py`
   (옛 `@generator` / `@task` / `@processor` 레지스트리)는 **삭제**되었고 코드에 옛 API 참조는 없다.
 - `uv run ruff check` · `ruff format --check` · `pyright` · `pytest` **모두 클린이다**
-  (pyright 0 errors, 87 tests passed). `examples/main.py serial`도 ex01~ex08 전부 완주한다.
+  (pyright 0 errors, 88 tests passed). `examples/main.py serial`도 ex01~ex08 전부 완주한다.
 - 예제는 `examples/ex01`~`examples/ex08` 여덟 개다. ex06은 파생 스테이지의 "합집합이 그대로면
   재시작하지 않는다"를, ex07·ex08은 instanter 경로를 다룬다. ex08은 요청형 스테이지가
   content_id로 공유되지 **않는다**는 것을 원천의 공유와 나란히 보인다.
@@ -244,7 +244,7 @@ async def _(ctx: SwingCtx):
 | 파일 | 덮는 범위 |
 | --- | --- |
 | `tests/support/streams.py` | 테스트 전용 모델·binder(원천 · 파생 · 심볼 변환 파생 · instanter 둘)와 스테이지 사건 기록 |
-| `tests/support/harness.py` | `Recorder`(Sender 구현), `wait_until()` |
+| `tests/support/harness.py` | `Recorder`(Sender 구현), 느린 소비자 `BlockingRecorder`, `wait_until()` |
 | `tests/conftest.py` | `domain` 픽스처(시작 → 테스트 → `stop()`) |
 | `tests/test_model.py` | 식별자 3종, content_id 캐시 무효화, `validate_model`·`cast_model` 왕복, `Sequence` |
 | `tests/test_helper.py` | digest/id, `TaskManager` 이름 점유·취소·재사용·실패 콜백 |
@@ -266,6 +266,9 @@ instanter 경로는 `test_domain.py`의 `instanter 스트림` 절이 덮는다. 
 `test_instant_unbinds_each_symbol_exactly_once`가, 센티널 취급은
 `test_instant_require_slot_is_not_unbound`가 맡는다. 이 셋은 상·하위 표기가 **다른** 요청
 (`SwingReq`: `BTC` → `BTC/USD`)을 쓰기 때문에 성립한다 — 같은 표기로 바꾸면 못 잡는다.
+슬롯을 닫을 때 태스크 이름 해제까지 기다리는 것(TODO 7)은
+`test_instant_symbol_can_be_resubscribed_right_away`가 맡는다. 소비자가 빠르면 옛 태스크가 우연히
+먼저 끝나 통과하므로, `BlockingRecorder`로 슬롯 태스크를 전송에 묶어 둬야 드러난다.
 
 "content_id가 같아도 요청형 스테이지는 공유되지 않는다"는 ex08과 같은 시나리오인
 `test_equal_instant_requests_do_not_share_a_stage`가 맡는다. 원천 쪽 짝인

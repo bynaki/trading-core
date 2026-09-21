@@ -431,6 +431,20 @@ class Domain:
         active_stage_set: set[Stage] = set()
         update_lock = Lock()
 
+        async def close_slots(target: set[str]) -> None:
+            """슬롯을 닫고 슬롯 태스크가 끝나 이름을 놓을 때까지 기다린다.
+
+            큐만 닫으면 태스크가 전송(`output`)에 묶여 있는 동안 `{id}:{symbol}` 이름이
+            점유된 채 남아, 같은 심볼을 곧바로 다시 열 때 이름 충돌이 난다.
+            """
+
+            for s in target:
+                transq_dict.pop(s).shutdown()
+                seq_sender_dict.pop(s)
+            async with TaskGroup() as tg:
+                for s in target:
+                    tg.create_task(self._cancel_by_name(f"{id}:{s}"))
+
         async def unbind_symbols(target: set[str]) -> None:
             """슬롯을 닫고 심볼별 정리 콜백을 부른다. `update()`와 `detach()`가 함께 쓴다.
 
@@ -439,9 +453,7 @@ class Domain:
 
             if not target:
                 return
-            for s in target:
-                transq_dict.pop(s).shutdown()
-                seq_sender_dict.pop(s)
+            await close_slots(target)
             if unbind_cb:
                 async with TaskGroup() as tg:
                     for s in target:
@@ -521,10 +533,7 @@ class Domain:
             # `bind_cb`로 연 슬롯은 모두 짝을 맞춰 닫는다. `"__require__"`는 `req_cb`가
             # 만든 슬롯이라 bind된 적이 없으므로 제외한다.
             await unbind_symbols(set(transq_dict) - {"__require__"})
-            for tq in transq_dict.values():  # 남은 것은 `"__require__"` 슬롯뿐이다
-                tq.shutdown()
-            transq_dict.clear()
-            seq_sender_dict.clear()
+            await close_slots(set(transq_dict))  # 남은 것은 `"__require__"` 슬롯뿐이다
             async with TaskGroup() as tg:
                 for req_stage in active_stage_set:
                     tg.create_task(req_stage.detach())

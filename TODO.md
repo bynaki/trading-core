@@ -26,6 +26,9 @@
    `"__require__"`는 `req_cb`가 만든 슬롯이라 bind된 적이 없으므로 제외한다. `update()` 쪽도 센티널이 `del_symbols`에 들어가지 않으므로 두 경로가 여기서도 같다.
    재현·검증: tests/test_domain.py의 `test_instant_detach_unbinds_remaining_symbols`(정리 누락), `test_instant_unbinds_each_symbol_exactly_once`(짝 계약), `test_instant_require_slot_is_not_unbound`(센티널 제외).
 
-7. `transq.shutdown()`은 `_task_sequence`를 비동기로 끝내므로 `f"{id}:{symbol}"` 태스크 이름이 곧바로 풀리지 않는다. 심볼을 뺐다가 바로 다시 넣으면 이름 충돌로 `TaskManagerError`가 날 수 있다. `TaskManager.cancel_by_name()`은 release 이벤트로 이름 해제까지 기다리는데 이 경로에는 그런 대기가 없다.
+7. [해결] instanter에서 심볼을 뺐다가 곧바로 다시 넣으면 `f"{id}:{symbol}"` 태스크 이름 충돌로 `TaskManagerError`가 나던 문제.
+   슬롯을 닫을 때 `transq.shutdown()`만 하고 `_task_sequence` 종료를 기다리지 않았다. 소비자(`output`)가 느려 태스크가 `await sender(...)`에 묶여 있으면 큐를 닫아도 끝나지 않으므로, 이 경우 재구독은 확정적으로 실패했다(소비자가 빠르면 우연히 통과한다).
+   슬롯 닫기를 `close_slots()` 지역 헬퍼로 뽑아 큐를 닫은 뒤 `cancel_by_name()`으로 이름 해제까지 기다리게 했다. `unbind_symbols()`와 `detach()`의 `"__require__"` 슬롯 정리가 함께 쓴다. 닫힌 슬롯에 남은 데이터는 버려지고, `unbind_cb`는 슬롯 태스크가 끝난 뒤에 불린다.
+   재현·검증: tests/test_domain.py의 `test_instant_symbol_can_be_resubscribed_right_away`(느린 소비자를 흉내 내는 `BlockingRecorder` 사용).
 
 8. 사용자 콜백이 예외를 던질 때의 정책이 없다. `unbind_cb`·`detach_cb`가 `TaskGroup` 안에서 던지면 `detach()`가 중간에 끊겨 상위 스테이지가 안 내려가고 `stage.update`/`detach` 교체도 안 된다. generate 콜백의 `finally`도 같은 노출을 갖는다. 1번과 같은 주제이므로 함께 정해야 한다.

@@ -1,6 +1,6 @@
 """비동기 스트림을 관찰하기 위한 테스트 도구."""
 
-from asyncio import sleep, timeout
+from asyncio import Event, sleep, timeout
 from collections.abc import Callable
 
 from trading_core import DataModel
@@ -62,3 +62,23 @@ class Recorder:
             f"'{self.tag}'가 {count}건을 받지 못했다. (현재 {self.count}건)",
             timeout_sec,
         )
+
+
+class BlockingRecorder(Recorder):
+    """받은 뒤 `release()` 전까지 반환하지 않는 `Sender` — 느린 소비자를 흉내 낸다.
+
+    이 Sender에 보내는 태스크는 `await sender(...)`에 묶여 스스로 끝나지 못한다.
+    """
+
+    def __init__(self, tag: str = "") -> None:
+        super().__init__(tag)
+        self._released = Event()
+
+    async def __call__(self, data: DataModel) -> None:
+        self.received.append(data)
+        await self._released.wait()
+
+    def release(self) -> None:
+        """막아 둔 전송을 모두 풀고, 이후 전송도 막지 않는다."""
+
+        self._released.set()
