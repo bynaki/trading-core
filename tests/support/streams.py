@@ -318,6 +318,39 @@ async def _(ctx: StreamContext, symbol: str):
     ctx.log.unbound.append(symbol)
 
 
+# ===== 심볼마다 다른 상위를 드는 instanter 스트림 =====
+
+
+class SplitReq(RequestModel):
+    """심볼마다 **서로 다른** 상위 요청(`split_upstream()`)에 붙는 요청형 모델.
+
+    심볼 하나가 빠지면 그 심볼만 쓰던 상위 요청이 통째로 쓰이지 않게 된다.
+    """
+
+    tag: str
+
+
+def split_upstream(tag: str, symbol: str) -> CounterReq:
+    """`SplitReq`의 심볼 `symbol`이 붙는 상위 요청."""
+
+    return CounterReq(tag=f"{tag}:{symbol}")
+
+
+@initialize
+def split(req: SplitReq) -> StreamContext:
+    """심볼별 상위를 쓰는 요청형 스테이지의 공유 컨텍스트를 만든다."""
+
+    return StreamContext(req)
+
+
+@split
+async def _(ctx: StreamContext, symbol: str):
+    """심볼마다 전용 상위 요청을 구독하는 시퀀스를 낸다."""
+
+    tag = cast_model(ctx.req, SplitReq).tag
+    yield split_upstream(tag, symbol)(f"{symbol}{QUOTE_SUFFIX}") | Relay(symbol)
+
+
 # ===== binder가 없는 요청 =====
 
 

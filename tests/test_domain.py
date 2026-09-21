@@ -20,10 +20,12 @@ from .support.streams import (
     DerivedData,
     DerivedReq,
     MappedReq,
+    SplitReq,
     SwingData,
     SwingReq,
     UnboundReq,
     log_of,
+    split_upstream,
 )
 
 
@@ -526,6 +528,32 @@ async def test_instant_require_slot_is_not_unbound(domain: Domain):
         await recorder.wait_for(2)
 
     assert log.unbound == ["BTC"]
+
+
+async def test_instant_detaches_an_upstream_no_sequence_uses(domain: Domain):
+    """어떤 시퀀스도 쓰지 않게 된 상위 스테이지는 그 자리에서 떼어 내고 다시 건드리지 않는다.
+
+    떼어 내지 않고 남겨 두면 이후 `update()`마다 빈 심볼 집합으로 갱신되는데, 원천이
+    이미 사라진 상위는 그때마다 새 원천이 만들어졌다가(init) 곧바로 정리된다(detach).
+    """
+
+    tag = "instant-split"
+    req = SplitReq(tag=tag)
+    btc_log = log_of(split_upstream(tag, "BTC"))
+    recorder = Recorder()
+
+    async with domain.stage(req, recorder) as stage:
+        await stage.update({"BTC", "ETH"})
+        await wait_until(lambda: recorder.symbols == {"BTC", "ETH"})
+
+        await stage.update({"ETH"})  # BTC만 쓰던 상위가 쓰이지 않게 된다
+        assert (btc_log.inits, btc_log.detached) == (1, 1)
+
+        await stage.update({"ETH", "XRP"})  # BTC와 무관한 갱신
+        await stage.update({"ETH"})
+        assert (btc_log.inits, btc_log.detached) == (1, 1)
+
+    assert (btc_log.inits, btc_log.detached) == (1, 1)
 
 
 async def test_equal_instant_requests_do_not_share_a_stage(domain: Domain):

@@ -1,12 +1,12 @@
-"""`domain.py`의 전달 계층 명세 — `TransmitQueue`와 `SendRouter`."""
+"""`domain.py`의 전달 계층 명세 — `TransmitQueue`, `SendRouter`, `SequenceSender`."""
 
 import pytest
 
 from trading_core import ClosedConnection, TransmitQueue
-from trading_core.domain import SendRouter
+from trading_core.domain import SendRouter, SequenceSender
 
 from .support.harness import Recorder
-from .support.streams import CounterData
+from .support.streams import CounterData, CounterReq, Relay
 
 # ===== TransmitQueue =====
 
@@ -83,3 +83,23 @@ async def test_shared_sender_drops_empty_registration():
 
     await shared(CounterData(symbol="BTC", count=1))
     assert recorder.count == 0
+
+
+# ===== SequenceSender =====
+
+
+async def test_sequence_sender_drops_data_for_a_closed_slot():
+    """닫힌 슬롯으로 가는 데이터는 조용히 버린다.
+
+    슬롯은 상위 스테이지의 구독이 갱신되기 **전에** 닫힌다. 그 사이 상위가 보낸 데이터가
+    `ClosedConnection`으로 올라가면 `SendRouter`를 거쳐 **공유된 상위 generator가 죽는다.**
+    같은 상위 심볼을 다른 소비자가 계속 구독 중이면 합집합이 그대로라 재시작되지 않는다.
+    """
+
+    transq = TransmitQueue()
+    sender = SequenceSender(transq, CounterReq(tag="closed-slot")("BTC/USD") | Relay("BTC"))
+    router = SendRouter()
+    router.set_sender(sender, {"BTC/USD"})
+    transq.shutdown()
+
+    await router(CounterData(symbol="BTC/USD", count=1))  # 예외 없이 버려진다

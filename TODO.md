@@ -19,7 +19,10 @@
    게다가 binder의 wrap을 거친 시퀀스에만 생기고 `__init__`에 선언이 없어서, `req(symbol)`로 직접 만든 `RequireSequence`에는 속성 자체가 없었다. 읽히지 않는 속성이 아니라 읽으면 `AttributeError`가 나는 함정이었다.
    부수 효과: `set_bind_cb()`/`set_require_cb()`의 wrap이 순수 통과가 되어 함께 사라졌다(`self._bind_cb = cb`). 제너레이터 래핑이 한 겹 줄었다. `get_generate_cb()`/`get_dependent_cb()`의 wrap은 `_tr_req_content_id`를 심으므로 남는다.
 
-5. `SendRouterSet.clear()`가 센더가 다 빠진 `Registered`를 남기므로, 해당 스테이지가 `active_stage_set`에 계속 남는다(`detaching_stage_set`에 걸리지 않는다). 지금은 `update(set())`을 받아 원천 구독이 정상 해제되고 나중 `detach()`도 무해한 no-op이라 실동작 문제는 없지만, 스테이지 수명이 실제 구독보다 길다는 점은 남아 있다.
+5. [해결] 어떤 시퀀스도 쓰지 않게 된 상위 스테이지가 instanter의 `active_stage_set`에 계속 남던 문제.
+   `SendRouterSet.clear()`가 센더가 다 빠진 `Registered`를 남겨 그 상위가 `detaching_stage_set`에 걸리지 않았다. 처음엔 "원천 구독이 정상 해제되니 실동작은 무해"로 봤지만 틀렸다. 남은 상위는 이후 `update()`마다 빈 집합으로 `update()`되는데, 원천 스테이지가 이미 사라졌으면 `_define_origin_gen_stage()`가 **원천을 새로 만들어 init 콜백을 부르고 곧바로 detach**한다. 즉 상위 컨텍스트(연결 등)가 갱신마다 열렸다 닫혔다. 심볼마다 다른 상위를 쓰는 요청에서 드러난다.
+   `SendRouterSet.prune()`을 두어 다시 채운 뒤 센더 없는 항목을 지우고, 그 상위는 같은 `update()`에서 떼어 내도록 했다. 항목이 무한히 쌓이는 것도 함께 막힌다. 떼어 낸 상위가 나중에 다시 쓰이면 새 `SendRouter`와 새 스테이지가 짝지어지므로 동일성 검사와 충돌하지 않는다.
+   재현·검증: tests/test_domain.py의 `test_instant_detaches_an_upstream_no_sequence_uses`(`SplitReq`).
 
 6. [해결] instanter 스테이지의 `detach()`가 남아 있는 심볼에 대해 `unbind_cb`를 부르지 않아, 심볼을 들고 종료하는 보통의 경우에 심볼별 자원이 새던 문제.
    심볼 단위 정리를 `unbind_symbols()` 지역 헬퍼로 뽑아 `update()`의 삭제 경로와 `detach()`가 함께 쓰도록 했다. 이제 계약은 "`bind_cb`로 연 심볼은 어느 경로로 닫히든 `unbind_cb` 한 번"이다. `update()`가 이미 `transq_dict`에서 pop 하므로 이중 호출은 구조적으로 막힌다.
@@ -32,3 +35,8 @@
    재현·검증: tests/test_domain.py의 `test_instant_symbol_can_be_resubscribed_right_away`(느린 소비자를 흉내 내는 `BlockingRecorder` 사용).
 
 8. 사용자 콜백이 예외를 던질 때의 정책이 없다. `unbind_cb`·`detach_cb`가 `TaskGroup` 안에서 던지면 `detach()`가 중간에 끊겨 상위 스테이지가 안 내려가고 `stage.update`/`detach` 교체도 안 된다. generate 콜백의 `finally`도 같은 노출을 갖는다. 1번과 같은 주제이므로 함께 정해야 한다.
+
+9. [해결] instanter 슬롯이 닫힐 때 공유된 상위 generator가 죽을 수 있던 경합.
+   `update()`는 빠지는 슬롯의 큐를 먼저 닫고 상위 구독은 나중에 갱신한다. 그 사이 상위가 보낸 데이터가 `SequenceSender`에서 `ClosedConnection`으로 터지면 `SendRouter`의 `TaskGroup`을 거쳐 원천 generator 태스크가 죽었다. 같은 상위 심볼을 다른 소비자(예: content_id가 같은 두 요청형 스테이지, ex08)가 계속 구독 중이면 합집합이 그대로라 재시작되지 않고, 그 소비자는 영영 데이터를 못 받는다. 7번 이전부터 있던 경합이다(재현 시나리오 기준 약 절반 확률).
+   닫힌 슬롯은 받을 소비자가 없으므로 `SequenceSender`가 `ClosedConnection`을 삼키도록 했다. 일반적인 "Sender 하나의 실패가 공유 generator를 죽인다"는 문제는 1·8번의 예외 정책에 남는다.
+   재현·검증: tests/test_transport.py의 `test_sequence_sender_drops_data_for_a_closed_slot`(경합이라 통합 테스트 대신 단위로 고정).

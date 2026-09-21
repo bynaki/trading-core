@@ -60,7 +60,13 @@ class SequenceSender:
         return self._sequence
 
     async def __call__(self, data: DataModel):
-        await self._sender((data, self._sequence))
+        try:
+            await self._sender((data, self._sequence))
+        except ClosedConnection:
+            # 슬롯은 상위 구독이 갱신되기 전에 닫힌다. 그 사이 온 데이터는 받을 소비자가
+            # 없으므로 버린다. 예외로 올리면 `SendRouter`를 거쳐 공유된 상위 generator가
+            # 죽고, 다른 소비자가 같은 상위 심볼을 계속 구독 중이면 재시작되지도 않는다.
+            pass
 
 
 class SendRouter:
@@ -132,6 +138,16 @@ class SendRouterSet:
         # 객체가 유지되어야 스테이지에 등록된 `Sender`와 동일성이 깨지지 않는다.
         for reg in self._registered_dict.values():
             reg.router.clear()
+
+    def prune(self):
+        """센더가 하나도 남지 않은 항목을 지운다. `clear()` 뒤 다시 채운 다음에 부른다.
+
+        지운 항목의 상위 스테이지는 같은 갱신에서 떼어 내므로, 나중에 같은 content_id가
+        다시 쓰이면 새 `SendRouter`와 새 스테이지가 짝지어져 동일성 검사가 깨지지 않는다.
+        """
+
+        for content_id in [c for c, reg in self._registered_dict.items() if not reg.router.symbols]:
+            del self._registered_dict[content_id]
 
     def __call__(self):
         yield from self._registered_dict.values()
@@ -504,6 +520,10 @@ class Domain:
                         router_set.add_sender(ss.sequence.require, ss)
                 current_stage_set: set[Stage] = set()
                 updating: list[tuple[Stage, set[str]]] = []
+                # 어떤 시퀀스도 쓰지 않게 된 상위는 여기서 빠져 `current_stage_set`에 들지 않고
+                # 아래에서 떼어진다. 남겨 두면 매 갱신마다 빈 집합으로 `update()`되어, 원천이
+                # 이미 사라진 상위가 그때마다 새로 만들어졌다(init) 곧바로 정리된다.
+                router_set.prune()
                 for reg in router_set():
                     req_stage: Stage | None = None
                     for act in active_stage_set:
