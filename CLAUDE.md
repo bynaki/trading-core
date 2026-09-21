@@ -43,9 +43,8 @@ uv run examples/main.py parallel      # 모든 예제를 공유 Domain에서 동
 
 ## 현재 저장소 상태 (중요)
 
-2026-08-26 기준. 작업 브랜치는 **`feat/request_model`**이고 `main`보다 8커밋 앞서 있다. 이 브랜치가
-하는 일은 `RequestModel`을 **instanter** 실행 경로로 확장하는 것이다(아래 "instanter" 절).
-원격에는 `origin/main` · `origin/feat/request_model` · `origin/update/require`(옛 브랜치)가 있다.
+2026-09-21 기준. 작업 브랜치는 **`main`**이다. `RequestModel`을 **instanter** 실행 경로로 확장한
+`feat/request_model` 브랜치(아래 "instanter" 절)는 `main`에 병합되었고, 원격에는 `origin/main`만 있다.
 
 - 등록 API 리팩터링(`definer.py` → `binder.py`)은 끝났고 `main`에 들어가 있다. `definer.py`
   (옛 `@generator` / `@task` / `@processor` 레지스트리)는 **삭제**되었고 코드에 옛 API 참조는 없다.
