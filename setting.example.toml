@@ -1,0 +1,80 @@
+# trading-core 설정 예시
+#
+# 쓰는 법: 이 파일을 `setting.toml`로 복사한 뒤 필요한 값만 고친다.
+#   cp setting.example.toml setting.toml
+#
+# 설정 파일을 찾는 순서 (앞에서 찾으면 뒤는 보지 않는다)
+#   1. 코드에서 `configure(path)`로 넘긴 경로
+#   2. 환경변수 TRADING_CORE_SETTINGS가 가리키는 경로
+#   3. 현재 작업 디렉터리의 `setting.toml`
+#   4. 셋 다 없으면 기본값 (콘솔에 text 형식만 켠 상태)
+# 1·2처럼 경로를 지정했는데 파일이 없으면 오류다.
+#
+# 이 파일은 프로젝트 전체의 설정 파일이다. 카테고리(테이블)별로 나누며, 로그 모듈은 [log]만 읽고
+# 다른 카테고리는 무시한다. 아래 값은 모두 **기본값**이라, 생략한 키는 이 값으로 동작한다.
+# [log] 안에 모르는 키가 있으면 오타를 바로 알 수 있도록 오류가 난다.
+#
+# 레벨 값은 "DEBUG" | "INFO" | "WARNING" | "ERROR" | "CRITICAL" (대문자) 중 하나다.
+# 레코드는 [log].level(루트 레벨)과 각 싱크의 level을 **둘 다** 넘어야 그 싱크로 나간다.
+
+
+[log]
+# 루트 로거 레벨. trading_core 내부뿐 아니라 이 프로세스의 모든 로거에 적용된다.
+# 이보다 낮은 레벨은 큐에 들어가기 전에 버려진다.
+level = "INFO"
+
+# 이 프로세스를 가리키는 이름. 로그서버 하나가 여러 서버의 로그를 받을 때 발신처를 구분하는 데 쓴다.
+# 레코드마다 service / host / pid / instance_id("<service_name>@<host>:<pid>")가 실린다.
+# 생략하면 호스트 이름(socket.gethostname())을 쓴다. 서버마다 다르게 붙이는 것을 권한다.
+# service_name = "trader-kr-01"
+
+
+[log.levels]
+# 특정 로거 이름만 레벨을 따로 정한다. 하위 이름에도 적용된다("asyncio"는 "asyncio.xxx"까지).
+# 시끄러운 서드파티 라이브러리를 누르거나, 특정 모듈만 자세히 볼 때 쓴다. 기본은 비어 있다.
+# 점(.)이 들어간 이름은 따옴표로 감싼다.
+# "asyncio" = "WARNING"
+# "trading_core.domain" = "DEBUG"
+
+
+[log.console]
+# 콘솔 출력.
+enabled = true
+level = "DEBUG"
+# "text": 사람이 읽는 한 줄 형식. [service@host:pid] 접두가 붙는다.
+# "json": 파일과 같은 JSON 한 줄 형식. 콘솔 출력을 수집기로 넘길 때 쓴다.
+format = "text"
+# "stderr" | "stdout"
+stream = "stderr"
+
+
+[log.file]
+# JSON Lines 파일(레코드 하나당 한 줄). 기본은 꺼져 있다.
+enabled = false
+level = "INFO"
+# 상대 경로는 현재 작업 디렉터리 기준이다. 없는 디렉터리는 만든다.
+path = "logs/trading_core.jsonl"
+# 파일을 교체하는 시점. logging.handlers.TimedRotatingFileHandler의 `when` 값을 그대로 쓴다.
+# "midnight"(자정), "H"(매시), "D"(매일), "W0"~"W6"(요일, W0=월요일) 등.
+when = "midnight"
+# 보관할 옛 파일 개수. 넘으면 오래된 것부터 지운다. 0이면 지우지 않는다.
+backup_count = 14
+# 교체 시점을 UTC 기준으로 잡을지. false면 로컬 시각 기준.
+utc = true
+
+
+[log.server]
+# 로그서버 전송. **아직 구현되지 않았다.** true로 켜면 configure()가 LogConfigError로 실패한다.
+# 아래 값들은 전송을 구현할 때 쓰일 자리다.
+enabled = false
+level = "WARNING"
+# 로그서버 주소.
+url = ""
+# 한 번에 보낼 레코드 수.
+batch_size = 100
+# 배치가 덜 차도 보내는 주기(초).
+flush_interval = 1.0
+# 전송 타임아웃(초).
+timeout = 3.0
+# 전송하지 못한 레코드를 쌓아 둘 최대 개수. 넘으면 오래된 것부터 버린다.
+max_buffer = 10000

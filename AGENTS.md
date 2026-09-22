@@ -55,7 +55,7 @@ uv run examples/main.py parallel      # 모든 예제를 공유 Domain에서 동
 - 등록 API 리팩터링(`definer.py` → `binder.py`)은 끝났고 `main`에 들어가 있다. `definer.py`
   (옛 `@generator` / `@task` / `@processor` 레지스트리)는 **삭제**되었고 코드에 옛 API 참조는 없다.
 - `uv run ruff check` · `ruff format --check` · `pyright` · `pytest` **모두 클린이다**
-  (pyright 0 errors, 90 tests passed). `examples/main.py serial`도 ex01~ex08 전부 완주한다.
+  (pyright 0 errors, 125 tests passed). `examples/main.py serial`도 ex01~ex08 전부 완주한다.
 - 예제는 `examples/ex01`~`examples/ex08` 여덟 개다. ex06은 파생 스테이지의 "합집합이 그대로면
   재시작하지 않는다"를, ex07·ex08은 instanter 경로를 다룬다. ex08은 요청형 스테이지가
   content_id로 공유되지 **않는다**는 것을 원천의 공유와 나란히 보인다.
@@ -70,10 +70,11 @@ uv run examples/main.py parallel      # 모든 예제를 공유 Domain에서 동
     `docs/TODO.md`, `docs/HANDOFF.md`, `docs/design.log.md`. `README.md`는 위 규칙대로 그대로 얇게 둔다.
 - `docs/TODO.md`에 남은 과제와 이미 해결한 불변식의 내력이 번호 순으로 적혀 있다. 특히 "require 콜백이
   심볼에 따라 다른 상위 요청을 반환할 수 없다"(2번)는 제약은 현재 구조상 유효하다.
-- 열린 과제는 1·8·**10**번이다. **10번(프로젝트 전반 로그 모듈 `logger.py` 구현)이 최우선**이고
-  설계는 `docs/design.log.md`에 있다. 1·8번(TaskManager·사용자 콜백의 예외 정책)은 정책이
-  **사용자 결정 대기** 중이므로 임의로 구현하지 말 것. 제안된 안은 "정리를 끝까지 수행한 뒤
-  `ExceptionGroup`으로 재발생" + "`SendRouter`에서 Sender 하나의 실패를 격리"다.
+- 로그 모듈(`logger.py`, TODO 10)은 구현되었다. 설계는 `docs/design.log.md`에 있다. 로그서버 전송은
+  뼈대만 있고, 기존 `print`는 아직 이 모듈로 옮기지 않았다(별도 과제).
+- 열린 과제는 1·8번(TaskManager·사용자 콜백의 예외 정책)뿐이다. 정책이 **사용자 결정 대기** 중이므로
+  임의로 구현하지 말 것. 제안된 안은 "정리를 끝까지 수행한 뒤 `ExceptionGroup`으로 재발생" +
+  "`SendRouter`에서 Sender 하나의 실패를 격리"다.
 - `playground.py`는 타입 실험용 스크래치 파일이다. 정식 예제가 아니다.
 
 ## 아키텍처
@@ -86,6 +87,7 @@ uv run examples/main.py parallel      # 모든 예제를 공유 Domain에서 동
 | `binder.py` | `initialize()` 데코레이터와 `BindPack` 전역 레지스트리 (요청 타입 → 콜백) |
 | `domain.py` | `Domain`, `Stage`/`OriginStage`, `SendRouter`/`SendRouterSet`, `TransmitQueue`, 수명 주기 |
 | `helper.py` | digest/id 생성, 이름 기반 취소를 지원하는 비동기 `TaskManager` |
+| `logger.py` | 프로젝트 전반 로그 모듈. `setting.toml` `[log]`로 콘솔·파일·로그서버 싱크를 켜는 JSON 로거 |
 | `exceptions.py` | 프레임워크 예외 |
 
 ### 모델 계층
@@ -279,6 +281,7 @@ async def _(ctx: SwingCtx):
 | `tests/test_helper.py` | digest/id, `TaskManager` 이름 점유·취소·재사용·실패 콜백 |
 | `tests/test_binder.py` | `initialize()` 추론과 거부 규칙, require 두 형태, 재바인드 거부, 전역 레지스트리 |
 | `tests/test_transport.py` | `TransmitQueue`, `SendRouter` 라우팅·교체·해제, 닫힌 슬롯의 `SequenceSender` |
+| `tests/test_logger.py` | 설정 탐색·검증, JSON 레코드·발신처, 싱크별 레벨, 파일 회전, 재구성·종료 |
 | `tests/test_domain.py` | content_id 단위 공유, 심볼 합집합, 재시작 조건, 두 정리 지점, 의존 스트림, instanter |
 
 옛 테스트를 되살리지 말 것 — 참고할 일이 있으면 `ff64509` 이전 이력에서 꺼내 보면 된다.
@@ -320,5 +323,9 @@ instanter 경로는 `test_domain.py`의 `instanter 스트림` 절이 덮는다. 
   등록된 심볼(`origin.output.symbols`)뿐이다. instanter의 `unbind_cb`는 예외로, `update()`가
   `TaskGroup`으로 await하므로 반환 직후에 단정할 수 있다.
 - binder는 무한히 데이터를 발행하므로 소비 개수나 `Recorder.wait_for()`로 종료를 제어해야 한다.
+- `test_logger.py`는 **프로세스 전역인 루트 로거**를 건드린다. autouse 픽스처가 CWD·환경변수를 격리하고
+  끝나면 `shutdown()`으로 루트 로거의 핸들러·레벨을 되돌린다(`_state.closed`도 풀어 다음 테스트가 자동
+  구성을 다시 시험할 수 있게 한다). 레코드는 파일 싱크를 켜고 `shutdown()`으로 큐를 비운 뒤 읽는다 —
+  출력은 리스너 스레드가 하므로 그 전에는 아직 안 써졌을 수 있다.
 - 새 불변식을 테스트로 덮었으면 **수정을 되돌려 그 테스트만 깨지는지** 확인할 것. 안 깨지면
   테스트가 그 불변식을 못 덮고 있는 것이다.

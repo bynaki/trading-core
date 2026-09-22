@@ -1,7 +1,8 @@
 # 로그 모듈 설계 (`logger.py`)
 
-`docs/TODO.md` 10번 과제의 설계 문서다. 구현 전 단계이며, 이 문서가 승인되면 `src/trading_core/logger.py`와
-`tests/test_logger.py`를 추가한다.
+`docs/TODO.md` 10번 과제의 설계 문서다. 구현은 `src/trading_core/logger.py`, 명세는
+`tests/test_logger.py`에 있다. 구현하면서 정한 것(자동 구성 시점, `shutdown()` 뒤의 동작, 로그서버
+싱크 뼈대의 범위)도 이 문서에 반영했다.
 
 ## 1. 목적과 범위
 
@@ -42,11 +43,15 @@ def shutdown() -> None: ...
 - **`get_logger(name)`** — `logging.getLogger(name)`을 그대로 감싼 `TrLogger`를 돌려준다. `trading_core.`
   같은 접두를 강제로 붙이지 않는다 — 호출부가 stdlib 관례대로 `get_logger(__name__)`을 쓰면
   `trading_core` 내부 모듈은 자연히 `"trading_core.domain"`이 되고, 이 라이브러리를 가져다 쓰는
-  바깥 앱은 `"myapp.strategy"`처럼 **자기 패키지명**으로 로거를 만들 수 있다(3절 참고). `configure()`가
-  아직 호출된 적이 없으면 첫 호출에서 기본 탐색으로 `configure()`를 자동 실행한다(라이브러리 코드가
-  `configure()`를 직접 부르지 않아도 동작하게 하기 위함).
-- **`shutdown()`** — 큐에 남은 레코드를 모두 내보낸 뒤 싱크를 닫는다. `atexit.register(shutdown)`으로
-  프로세스 종료 시 자동 호출되도록 등록한다.
+  바깥 앱은 `"myapp.strategy"`처럼 **자기 패키지명**으로 로거를 만들 수 있다(3절 참고).
+  로거를 얻는 것만으로는 설정을 읽지 않는다. `configure()`가 아직 불리지 않았으면 **처음 로그를 남길
+  때** 기본 탐색으로 `configure()`를 자동 실행한다(라이브러리 코드가 `configure()`를 직접 부르지 않아도
+  동작하게 하기 위함). 모듈 맨 위의 `log = get_logger(__name__)`가 import 시점에 파일을 읽지 않고,
+  앱이 첫 로그 전에 `configure(path)`를 부르면 그 설정이 그대로 쓰인다.
+- **`shutdown()`** — 큐에 남은 레코드를 모두 내보낸 뒤 싱크를 닫고, 루트 로거의 핸들러·레벨과
+  `[log.levels]`로 바꾼 레벨을 원래대로 돌린다. `atexit.register(shutdown)`으로 프로세스 종료 시 자동
+  호출되도록 등록한다. `shutdown()` 뒤의 로그 호출은 **자동 구성을 하지 않는다**(종료 중에 남은 로그가
+  리스너 스레드를 다시 띄우지 않도록). 다시 쓰려면 `configure()`를 명시적으로 부른다.
 
 **호출 형태 — 얇은 래퍼 `TrLogger`**
 
@@ -58,9 +63,12 @@ log.info("구독 갱신", symbol="BTC", union_size=3)
 log.error("바인더 콜백 실패", exc_info=True, req_id=req.get_model_inst_id())
 ```
 
-`TrLogger.info/debug/warning/error/critical(msg, *, exc_info=False, **fields)`는 내부적으로
-`logging.Logger.info(msg, extra={"fields": fields})`를 호출한다. `fields`는 JSON 레코드의 `fields`
-객체가 된다. `exc_info=True`면 현재 예외 정보를 잡아 `exc` 필드로 직렬화한다.
+`TrLogger.debug/info/warning/error/critical(msg, /, *, exc_info=False, **fields)`는 내부적으로
+`logging.Logger.log(level, msg, extra={"tr_fields": fields}, stacklevel=3)`을 호출한다. `fields`는 JSON
+레코드의 `fields` 객체가 된다. `msg`는 위치 전용이라 `msg=...`도 필드 이름으로 쓸 수 있다.
+`exc_info=True`면 현재 예외 정보를 잡아 `exc` 필드로 직렬화하고, `exception(msg, **fields)`는
+`error(..., exc_info=True)`의 줄임이다. `stacklevel=3`이라 `module`/`func`/`line`은 래퍼가 아니라
+호출부를 가리킨다.
 
 콘솔·파일·서버 모두 이 호출 **하나**로 도달한다. 목적지별 on/off·레벨은 오직 `setting.toml`이 정한다.
 
@@ -166,6 +174,9 @@ log.error("바인더 콜백 실패", exc_info=True, req_id=req.get_model_inst_id
 `[log]`를 포함한 다른 카테고리(예: `[exchange]`)는 이 모듈이 관여하지 않고 무시한다. `tomllib`로
 읽고 `pydantic`(`extra="forbid"`) 모델로 검증한다.
 
+모든 키에 설명을 단 예시는 저장소 루트의 `setting.example.toml`에 있다(값은 모두 기본값). `setting.toml`로
+복사해 쓴다. 이름이 달라 CWD 탐색에는 걸리지 않는다.
+
 ```toml
 [log]
 level = "INFO"
@@ -228,12 +239,22 @@ max_buffer = 10000      # 초과분은 오래된 것부터 버리고, 버려진 
 ## 7. 로그서버 확장 지점 (미구현)
 
 `ServerSink`는 이번 단계에서 클래스 뼈대와 계약만 정의하고 실제 전송은 구현하지 않는다.
+`configure()`는 아직 이 싱크를 만들지 않는다.
 
-- 계약: `send_batch(lines: list[str]) -> None` — JSON 문자열(레코드 하나당 한 줄) 배치를 받아 전송.
-  실패 시 예외를 던지면 `ServerSink`가 재시도 정책(횟수·백오프는 추후 결정)에 따라 처리한다.
-- 배치는 `batch_size` 또는 `flush_interval` 중 먼저 차는 조건으로 내보낸다.
-- 전송 실패가 누적돼 `max_buffer`를 넘으면 **오래된 레코드부터 버리고**, 버려진 개수를 다음 성공
-  전송 때 경고 로그(콘솔/파일 싱크로)로 남긴다.
+지금 있는 것:
+
+- 계약: `send_batch(lines: list[str]) -> None` — JSON 문자열(레코드 하나당 한 줄) 배치를 받아 전송한다.
+  지금은 `NotImplementedError`다. 전송을 구현할 때 이 메서드를 채운다.
+- 배치 버퍼: 줄이 `batch_size`개 모이면 `flush()`가 `batch_size`씩 보낸다. `send_batch()`가 예외를
+  던지면 보내지 못한 줄은 버퍼에 남고 다음 `flush()`(또는 `close()`)에서 다시 보낸다.
+- 버퍼가 `max_buffer`를 넘으면 **오래된 줄부터 버리고** `dropped`에 센다.
+
+전송을 구현할 때 정할 것:
+
+- `flush_interval`마다 배치가 안 차도 보내는 타이머, `timeout`, 재시도 횟수·백오프.
+- 지금은 실패한 전송을 다음 레코드마다 다시 시도한다. 백오프 없이 두면 로그서버가 죽었을 때 레코드마다
+  전송을 시도하게 된다.
+- 버린 개수(`dropped`)를 경고 로그로 남기는 시점(다음 성공 전송 때 콘솔/파일 싱크로).
 - `[log.server].enabled = true`인데 실제 전송 구현이 없는 지금 상태에서는, `configure()`가
   `LogConfigError("로그서버 전송은 아직 구현되지 않았다")`로 **즉시 실패**한다(fail-fast). 이렇게 해야
   "설정은 켰는데 조용히 안 나가는" 상태를 피할 수 있다.

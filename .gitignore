@@ -10,3 +10,6 @@ nvim.log
 # Virtual environments
 .venv
 
+
+# 로그 파일 싱크의 기본 경로
+logs/

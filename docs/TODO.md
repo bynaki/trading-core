@@ -1,6 +1,6 @@
 # TODO
 
-> 우선순위: **10번(로그 모듈)이 최우선**이다. 1·8번은 사용자 결정 대기로 보류 중이다.
+> 열린 과제는 1·8번(예외 정책)뿐이며 사용자 결정 대기로 보류 중이다.
 
 1. TaskManager: task에서 예외가 발생했을때 TaskManager 단에서 처리 방법
 
@@ -43,7 +43,14 @@
    닫힌 슬롯은 받을 소비자가 없으므로 `SequenceSender`가 `ClosedConnection`을 삼키도록 했다. 일반적인 "Sender 하나의 실패가 공유 generator를 죽인다"는 문제는 1·8번의 예외 정책에 남는다.
    재현·검증: tests/test_transport.py의 `test_sequence_sender_drops_data_for_a_closed_slot`(경합이라 통합 테스트 대신 단위로 고정).
 
-10. 프로젝트 전반 로그 모듈(`logger.py`) 구현. 설계는 `docs/design.log.md`에 있다. `setting.toml`의
-    `[log]` 카테고리로 콘솔·파일·로그서버(자리만, 아직 미구현) 스위치를 설정한다. 여러 서버에 같은
-    코드가 뜨는 배포를 대비해 레코드마다 `service`/`host`/`pid`/`instance_id`로 발신처를 구분한다.
-    구현 시 `tests/test_logger.py`를 새로 추가한다.
+10. [해결] 프로젝트 전반 로그 모듈(`logger.py`). 설계는 `docs/design.log.md`에 있다. `setting.toml`의
+    `[log]` 카테고리로 콘솔·파일·로그서버 스위치를 설정하고, 레코드마다 `service`/`host`/`pid`/`instance_id`로
+    발신처를 구분한다. 큐 핸들러는 진짜 루트 로거에 붙어 `trading_core.*`와 바깥 앱의 로거를 같은 싱크로 모은다.
+    구현하며 정한 것: 자동 구성은 `get_logger()`가 아니라 **첫 로그 호출** 때 한다(import 시점에 파일을 읽지 않게).
+    `shutdown()` 뒤에는 자동 구성하지 않는다. 큐와 큐 핸들러는 재구성해도 유지해, 리스너를 갈아 끼우는 사이에 다른
+    스레드가 남긴 레코드가 빠지지 않는다.
+    재현·검증: tests/test_logger.py. 재구성 중 유실은 경합이라 `test_reconfigure_loses_nothing_logged_concurrently`가
+    확률적으로 잡는다(큐를 재구성마다 새로 만드는 변형을 약 2/3 확률로 잡음).
+    남은 것: 로그서버 전송(`ServerSink.send_batch()`, 타이머·재시도·백오프, `dropped` 경고)은 뼈대만 있고,
+    `[log.server] enabled = true`면 `configure()`가 `LogConfigError`로 실패한다. 기존 `print`를 이 모듈로 옮기는 일은
+    별도 과제다.
