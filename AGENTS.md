@@ -11,6 +11,14 @@ WebSocket 클라이언트가 아니라, 실시간 스트림을 다룰 때 반복
 
 문서·주석·docstring·예외 메시지는 **한국어**로 작성한다. 기존 스타일을 따를 것.
 
+## 새 세션을 시작할 때
+
+이 파일 다음으로 **`docs/HANDOFF.md`**를 읽는다. 직전 세션이 어디서 멈췄는지, 지금 브랜치·커밋
+상태, 사용자에게 확인해야 할 것(push/PR 여부 등)이 있으면 거기 있다. 그다음 **`docs/TODO.md`**로
+남은 과제와 이미 해결한 불변식의 내력을 확인한다. `HANDOFF.md`는 일을 이어받아 끝내면 지워도
+되는 일회성 문서이고, `TODO.md`는 세션이 바뀌어도 계속 남는 백로그다 — 새로 안 것이나 남긴
+후속 작업은 `HANDOFF.md`가 아니라 `TODO.md`에 번호를 매겨 적어야 다음 세션도 볼 수 있다.
+
 ## 환경
 
 - Python **3.14** (`.python-version`, uv가 자동 인식)
@@ -49,8 +57,10 @@ uv run examples/main.py parallel      # 모든 예제를 공유 Domain에서 동
 
 ## 현재 저장소 상태 (중요)
 
-2026-09-21 기준. 작업 브랜치는 **`main`**이다. `RequestModel`을 **instanter** 실행 경로로 확장한
-`feat/request_model` 브랜치(아래 "instanter" 절)는 `main`에 병합되었고, 원격에는 `origin/main`만 있다.
+2026-09-22 기준. 작업 브랜치는 **`feat/log`**다(로그 모듈, `docs/TODO.md` 10번). `main`보다 5커밋
+앞서 있고 모두 `origin/feat/log`에 push했다. **PR은 아직 만들지 않았다** — PR·병합은 사용자
+결정 대기다. `RequestModel`을 **instanter** 실행 경로로 확장한 `feat/request_model` 브랜치
+(아래 "instanter" 절)는 이미 `main`에 병합되어 사라졌다.
 
 - 등록 API 리팩터링(`definer.py` → `binder.py`)은 끝났고 `main`에 들어가 있다. `definer.py`
   (옛 `@generator` / `@task` / `@processor` 레지스트리)는 **삭제**되었고 코드에 옛 API 참조는 없다.
@@ -73,11 +83,12 @@ uv run examples/main.py parallel      # 모든 예제를 공유 Domain에서 동
     `docs/TODO.md`, `docs/HANDOFF.md`, `docs/design.log.md`. `README.md`는 위 규칙대로 그대로 얇게 둔다.
 - `docs/TODO.md`에 남은 과제와 이미 해결한 불변식의 내력이 번호 순으로 적혀 있다. 특히 "require 콜백이
   심볼에 따라 다른 상위 요청을 반환할 수 없다"(2번)는 제약은 현재 구조상 유효하다.
-- 로그 모듈(`logger.py`, TODO 10)은 구현되었다. 설계는 `docs/design.log.md`에 있다. 로그서버 전송은
-  뼈대만 있고, 기존 `print`는 아직 이 모듈로 옮기지 않았다(별도 과제).
-- 열린 과제는 1·8번(TaskManager·사용자 콜백의 예외 정책)뿐이다. 정책이 **사용자 결정 대기** 중이므로
-  임의로 구현하지 말 것. 제안된 안은 "정리를 끝까지 수행한 뒤 `ExceptionGroup`으로 재발생" +
-  "`SendRouter`에서 Sender 하나의 실패를 격리"다.
+- 로그 모듈(`logger.py`, TODO 10)은 구현되었다. 설계는 `docs/design.log.md`에 있다. 남은 것은
+  TODO 11(로그서버 실제 전송 — 뼈대만 있고 `ServerSink.send_batch()`가 `NotImplementedError`)과
+  TODO 12(기존 `print`를 이 모듈로 옮기기)로 남겨 두었다.
+- 열린 과제는 1·8번(TaskManager·사용자 콜백의 예외 정책)과 11·12번(로그 모듈 후속)이다. 1·8번은
+  정책이 **사용자 결정 대기** 중이므로 임의로 구현하지 말 것. 제안된 안은 "정리를 끝까지 수행한 뒤
+  `ExceptionGroup`으로 재발생" + "`SendRouter`에서 Sender 하나의 실패를 격리"다.
 - `playground.py`는 타입 실험용 스크래치 파일이다. 정식 예제가 아니다.
 
 ## 아키텍처

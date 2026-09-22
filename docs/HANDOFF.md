@@ -1,4 +1,4 @@
-# 인수인계 (2026-09-21)
+# 인수인계 (2026-09-22)
 
 새 세션은 이 문서부터 읽는다. 프로젝트 전반의 안내는 `AGENTS.md`(`CLAUDE.md`가 참조)에 있고,
 과제의 내력은 `docs/TODO.md`에 있다. 이 문서는 **직전 세션이 어디서 멈췄는지**만 다룬다.
@@ -6,44 +6,64 @@
 
 ## 지금 상태
 
-- 브랜치 `main`, 작업 트리 깨끗함. **`origin/main`보다 5커밋 앞서 있고 push하지 않았다.**
-- ruff check · format · pyright(0 errors) · pytest(90 passed) 모두 통과.
-  `uv run examples/main.py serial`과 `parallel` 모두 ex01~ex08 완주, 오류 없음.
+- 브랜치 `feat/log`, 작업 트리 깨끗함. `main`보다 5커밋 앞서 있고, 5커밋 모두
+  `origin/feat/log`에 push했다. **PR은 아직 만들지 않았다.**
+- ruff check · format · pyright(0 errors) · pytest(125 passed) 모두 통과.
+  `uv run examples/main.py serial`과 `parallel` 모두 ex01~ex09 완주, 오류 없음.
 
-push 대기 중인 커밋:
+`feat/log`가 `main`에 얹은 커밋(오래된 순):
 
 | 커밋 | 내용 |
 | --- | --- |
-| `e3fdad8` docs | 병합 완료된 저장소 상태와 TODO 2번의 테스트 참조를 현행으로 |
-| `003fcea` fix | TODO 7 — instanter 슬롯을 닫을 때 태스크 이름 해제까지 기다리기 |
-| `91ae02f` fix | TODO 5 · TODO 9 — 안 쓰이게 된 상위 떼어 내기, 닫힌 슬롯이 공유 상위를 죽이지 않게 |
-| `4192739` docs | "커밋 전에 검증하고 사용자에게 묻는다" 규칙 추가 |
-| `fb1811e` docs | 에이전트 안내를 `AGENTS.md`로 옮기고 `CLAUDE.md`는 `@AGENTS.md` 한 줄만 |
+| `7826de7` docs | `TODO.md`·`HANDOFF.md`를 `docs/`로 이동 |
+| `4714176` docs | 로그 모듈(`logger.py`) 설계 문서 `docs/design.log.md` 추가 |
+| `2f32ea3` feat | 로그 모듈 구현(`src/trading_core/logger.py`) + 테스트 35개 + `setting.example.toml` |
+| `29dac3c` docs | ex09(로그 모듈 사용 예제) 추가 |
+| (이 문서) docs | 새 세션 인수인계, TODO 11·12 승격, `AGENTS.md` 새 세션 안내 |
 
-## 직전 세션에서 고친 것 (요약)
+## 이번 세션에서 한 것 (요약)
 
-자세한 내력은 `docs/TODO.md` 5·7·9번에 있다.
+TODO 10 — 프로젝트 전반 로그 모듈. 설계부터 구현·예제까지 한 흐름으로 끝냈다. 자세한 내력은
+`docs/design.log.md`와 `docs/TODO.md` 10번에 있다.
 
-- **TODO 7** — 소비자가 느리면 슬롯 태스크가 `await sender(...)`에 묶여, 큐를 닫아도 이름
-  `{id}:{symbol}`이 풀리지 않았다. 같은 심볼을 곧바로 재구독하면 `TaskManagerError`.
-  → `_define_inst_stage()` 안에 `close_slots()`를 두어 `cancel_by_name()`으로 이름 해제까지 대기.
-- **TODO 5** — 어떤 시퀀스도 안 쓰게 된 상위가 `active_stage_set`에 남아, 이후 `update()`마다
-  빈 집합으로 갱신되며 **원천이 새로 만들어졌다(init) 곧바로 정리(detach)**되었다.
-  "실동작 무해"라던 기존 판단은 틀렸다. → `SendRouterSet.prune()`.
-- **TODO 9 (새로 발견)** — 슬롯은 상위 구독 갱신보다 먼저 닫힌다. 그 사이 온 데이터가
-  `ClosedConnection`으로 `SendRouter`의 `TaskGroup`을 타고 올라가 **공유 상위 generator가 죽었다.**
-  다른 소비자가 같은 상위 심볼을 쓰고 있으면 합집합이 그대로라 재시작되지 않는다(원래부터 있던 경합).
-  → `SequenceSender.__call__`이 `ClosedConnection`을 삼킨다.
+- **설계**: 처음엔 로그서버 하나가 여러 서버의 로그를 받는 걸 몰랐는데, 사용자가 짚어 줘서
+  레코드마다 `service`/`host`/`pid`/`instance_id`를 싣도록 넣었다. 또 `get_logger()`가
+  `trading_core.<name>` 접두를 강제하던 초안도 문제였다 — 이 라이브러리를 쓰는 바깥 앱의 로그까지
+  라이브러리 네임스페이스에 갇혔다. `logging.getLogger(name)`을 그대로 감싸는 것으로 고쳤고,
+  그 결과 큐 핸들러를 `trading_core` 로거가 아니라 **진짜 Python 루트 로거**에 붙여야 했다
+  (공통 조상이 거기뿐이라서).
+- **구현**: `QueueHandler`/`QueueListener` 위에 동기 호출 + 백그라운드 출력을 쌓았다. 콘솔(text/json)·
+  파일(날짜별 회전 JSON Lines)·로그서버(뼈대만, 켜면 `LogConfigError`로 fail-fast) 세 싱크가
+  `setting.toml`의 `[log]`로 켜진다. 구현하며 문서에 없던 것도 정했다: 자동 구성은 `get_logger()`가
+  아니라 **첫 로그 호출** 때(모듈 import가 파일을 안 읽게), `shutdown()` 뒤엔 자동 구성 안 함,
+  큐·큐 핸들러는 재구성해도 유지(리스너 교체 중 다른 스레드의 레코드가 안 빠지게).
+- **검증 방법**: 테스트를 쓴 뒤 핵심 동작 8개를 하나씩 코드에서 깨 보고 그 테스트만 실패하는지
+  확인했다(mutation testing). 하나(큐를 재구성마다 새로 만드는 변형)는 경합이라 3번 중 2번만 잡힌다 —
+  `test_reconfigure_loses_nothing_logged_concurrently`에 그렇게 적어 뒀다.
+- **예제 ex09**: 사용자가 별도로 요청. 싱크별 필터링, `[log.levels]`로 시끄러운 로거 누르기,
+  `log.exception()`의 `exc` 필드, `task` 필드가 어느 태스크에서 왔는지, `instance_id`로 로그 파일
+  거르기를 한 화면에서 보인다.
+- **문서 재배치**: 사용자 요청으로 `TODO.md`·`HANDOFF.md`를 `docs/`로 옮기고 설계 문서도 처음부터
+  거기 두었다. `AGENTS.md`의 경로·개수·표를 그때그때 맞췄다(이번 세션 마지막에 한 번 더 정리함 —
+  아래 "이번 세션에서 정리한 문서" 참고).
 
-새 테스트: `test_instant_symbol_can_be_resubscribed_right_away`(`BlockingRecorder` 사용),
-`test_instant_detaches_an_upstream_no_sequence_uses`(`SplitReq` 사용),
-`test_transport.py`의 `test_sequence_sender_drops_data_for_a_closed_slot`.
-셋 다 해당 수정만 되돌리면 그 테스트 하나만 깨지는 것을 확인했다.
+## 이번 세션에서 정리한 문서
+
+사용자가 "새 세션 시작 준비" 겸 문서 정리를 요청해서 함께 했다.
+
+- `docs/HANDOFF.md`: 이 파일을 이번 인수인계로 새로 썼다(직전 내용은 push 여부·예외 정책을 다루던
+  구버전이었고, 그 두 안건은 여전히 유효해 아래 "사용자 결정 대기"에 옮겨 왔다).
+- `docs/TODO.md`: 10번 본문 속에 묻혀 있던 미완료 항목(로그서버 전송, `print` 이관)을 **11번·12번
+  으로 승격**했다. 묻힌 채로 두면 10번이 `[해결]`이라 다음 세션이 지나칠 위험이 있었다. 1번은
+  8번과 같은 주제인데 너무 짧아서 "8번 참고"를 붙였다. 헤더의 열린 과제 안내도 1·8·11·12로 갱신.
+- `AGENTS.md`: 새 "새 세션을 시작할 때" 절을 프로젝트 개요 바로 다음에 추가해 `docs/HANDOFF.md` →
+  `docs/TODO.md` 순으로 읽으라고 명시했다. "현재 저장소 상태"의 날짜(9/21→9/22)와 브랜치(`main`→
+  `feat/log`, push 여부, PR 미생성)를 갱신하고, 로그 모듈 항목이 11·12번을 가리키게 고쳤다.
 
 ## 사용자 결정 대기
 
-1. **push 여부** — 위 5커밋을 `origin/main`에 올릴지. 묻지 않고 push하지 말 것.
-2. **TODO 1·8 예외 정책** — 정해지기 전에는 구현하지 말 것. 사용자에게 제시한 선택지:
+1. **PR·병합** — PR을 만들지, `main`에 언제 합칠지. 묻지 않고 PR을 만들거나 병합하지 말 것.
+2. **TODO 1·8 예외 정책** — 여전히 미정이라 구현하지 말 것. 사용자에게 제시한 선택지:
    1. 로그만 남기고 계속 — 정리는 항상 끝나지만 오류를 놓치기 쉽다.
    2. **정리를 끝까지 한 뒤 모은 오류를 `ExceptionGroup`으로 재발생** — (추천) 정리 보장 +
       호출자도 오류를 본다. 현재 `TaskGroup` 스타일과 맞는다.
@@ -59,17 +79,30 @@ push 대기 중인 커밋:
    - `domain.py` `SendRouter.__call__` — `TaskGroup` 안에서 Sender 하나가 던지면 전체가 실패.
    - `domain.py` `_task_sequence()` — `seq.invoke()`가 던지면 슬롯 태스크가 조용히 죽는다.
    - `helper.py` `TaskManager._task_wrapper()` / `on_task_failure()` — 현재 태스크 예외 처리 지점.
+3. **로그서버 실제 전송(TODO 11)** — `ServerSink.send_batch()`가 `NotImplementedError`다. 프로토콜(HTTP?
+   WebSocket? UDP?), 재시도·백오프, `flush_interval` 타이머는 실제로 붙일 로그서버가 정해지면
+   같이 정한다. `docs/design.log.md` 7절·"미결 사항" 참고.
+4. **기존 `print`를 로그 모듈로 옮기는 일(TODO 12)** — `helper.py`(`TaskManager`의 `[TASK ...]` 진단)와
+   `domain.py`(경고 하나)에 `print`가 남아 있다. 이번 설계·구현 범위에서 의도적으로 뺐다
+   (`docs/design.log.md` "비목표"). 옮길지, 옮긴다면 로그 레벨을 뭘로 할지 사용자와 정할 것.
 
-## 작업 규칙 (이번 세션에서 확정된 것)
+## 작업 규칙 (계속 유효)
 
 - **커밋·push 전에 검증하고 사용자 승인을 받는다.** 검증 결과와 커밋할 파일·메시지를 보여 주고
   승인 후에만 커밋한다. 계획 승인은 커밋 승인이 아니다. (`AGENTS.md` "코드 규약")
-- 새 불변식을 테스트로 덮으면 수정을 되돌려 그 테스트만 깨지는지 확인한다.
+- **커밋·push 전에 개인정보·비밀값·취약점을 검사**하고 결과를 승인 요청에 같이 보고한다.
+- 새 불변식을 테스트로 덮으면 수정을 되돌려 그 테스트만 깨지는지 확인한다(mutation testing).
+  이번 세션은 로그 모듈 8개 동작 전부에 이 방식을 적용했다.
 
 ## 알아 둘 함정
 
 - 커밋된 파일에 `git stash push <file>`을 하면 아무것도 안 하고 "No stash entries"로 끝난다.
   수정 전 코드로 되돌려 시험할 때는 파일을 스크래치에 복사해 두고 되돌리는 편이 안전하다.
-- TODO 9 같은 경합은 통합 테스트로는 약 절반 확률로만 재현된다. 재현용 탐침(두 `SwingReq`
-  스테이지가 같은 `BTC`를 구독하고 한쪽이 빠졌다 들어오기를 반복)은 단위 테스트로 대체하고 지웠다.
-- 테스트는 요청의 `tag`로 격리한다. 새 테스트는 다른 테스트와 겹치지 않는 `tag`를 쓸 것.
+- `test_logger.py`는 **프로세스 전역인 루트 로거**를 건드린다. autouse 픽스처가 CWD·환경변수를
+  격리하고 `shutdown()`으로 되돌리지만, 이 파일을 고칠 때 다른 테스트 파일과 병렬로 돌리는
+  러너를 쓰면 상태가 섞일 수 있다(`pytest`는 기본으로 순차 실행이라 지금은 문제없다).
+- TODO 9 같은 경합은 통합 테스트로는 확률적으로만 드러난다. 재현이 잘 안 될 때는 문제의
+  타이밍을 단위 테스트로 직접 만드는 편이 낫다(`test_transport.py`,
+  `test_reconfigure_loses_nothing_logged_concurrently`가 그 예).
+- 테스트는 요청의 `tag`(모델 테스트) 또는 로거 이름(로그 테스트)으로 격리한다. 새 테스트는
+  기존과 겹치지 않는 값을 쓸 것.

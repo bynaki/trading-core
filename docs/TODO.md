@@ -1,8 +1,9 @@
 # TODO
 
-> 열린 과제는 1·8번(예외 정책)뿐이며 사용자 결정 대기로 보류 중이다.
+> 열린 과제는 1·8번(예외 정책, 사용자 결정 대기)과 11·12번(로그 모듈 후속)이다.
 
-1. TaskManager: task에서 예외가 발생했을때 TaskManager 단에서 처리 방법
+1. TaskManager: task에서 예외가 발생했을때 TaskManager 단에서 처리 방법. 8번이 이 주제를
+   구체화한 것이니 손대기 전에 함께 본다.
 
 2. [해결] 같은 파생 요청을 서로 다른 심볼 집합으로 동시에 구독하면 먼저 구독한 쪽이 데이터를 전혀 받지 못하던 문제.
    파생 스테이지 자신의 심볼은 SharedSender가 합집합으로 관리하는데, 상위 원천에 등록하는 심볼은 그 시점 update의 req_symbols뿐이라 같은 transq의 이전 등록을 덮어쓰고 있었다. require 변환을 set_sender() 뒤로 옮겨 합집합(current_symbols)을 입력으로 쓰도록 고쳤다.
@@ -51,6 +52,16 @@
     스레드가 남긴 레코드가 빠지지 않는다.
     재현·검증: tests/test_logger.py. 재구성 중 유실은 경합이라 `test_reconfigure_loses_nothing_logged_concurrently`가
     확률적으로 잡는다(큐를 재구성마다 새로 만드는 변형을 약 2/3 확률로 잡음).
-    남은 것: 로그서버 전송(`ServerSink.send_batch()`, 타이머·재시도·백오프, `dropped` 경고)은 뼈대만 있고,
-    `[log.server] enabled = true`면 `configure()`가 `LogConfigError`로 실패한다. 기존 `print`를 이 모듈로 옮기는 일은
-    별도 과제다.
+    남은 것은 11·12번으로 옮겨 적었다.
+
+11. 로그서버로 실제 전송하기. `ServerSink.send_batch()`가 `NotImplementedError`다. 배치 버퍼·
+    `dropped` 카운트까지는 있고(`docs/design.log.md` 7절), 프로토콜(HTTP? WebSocket? UDP?)과
+    `flush_interval` 타이머·재시도·백오프는 실제로 붙일 로그서버가 정해지면 같이 정한다.
+    `[log.server] enabled = true`인 채로 이 항목을 그대로 두면 `configure()`가 `LogConfigError`로
+    fail-fast하므로, 정책 미정 상태에서도 "조용히 안 나가는" 사고는 나지 않는다.
+
+12. 기존 `print`를 로그 모듈로 옮기기. `helper.py`의 `TaskManager`(`[TASK SUBMIT]` 등 진단, 여러 곳)와
+    `domain.py`의 `SendRouter.__call__`에 있는 경고 한 줄("Sender가 없다")이 대상이다.
+    `docs/design.log.md` "비목표"에서 이번 설계·구현 범위 밖으로 뺐다. `logger.py`는 `helper.py`·
+    `domain.py`를 import하지 않으므로 순환 임포트 문제는 없다 — 옮길 때 정할 것은 레벨뿐이다
+    (진단은 DEBUG, "Sender 없음"은 WARNING 정도가 자연스러워 보인다).
