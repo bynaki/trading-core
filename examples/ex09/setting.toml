@@ -1,0 +1,25 @@
+# ex09 전용 설정. run_ex.py가 configure(이 파일의 경로)로 명시적으로 읽는다.
+# 모든 키의 설명은 저장소 루트의 setting.example.toml에 있다.
+
+[log]
+# 루트 레벨을 DEBUG로 열어 두고, 어디까지 내보낼지는 싱크별 레벨이 정한다.
+level = "DEBUG"
+# 레코드마다 실리는 발신처 이름. 서버마다 다르게 붙인다.
+service_name = "ex09-local"
+
+[log.levels]
+# 틱마다 원시 페이로드를 찍는 로거를 INFO로 누른다. 파일 싱크가 DEBUG여도 이 로거의 DEBUG는 안 나간다.
+"ex09.wire" = "INFO"
+
+[log.console]
+# 콘솔에는 사람이 읽는 text로 INFO 이상만.
+enabled = true
+level = "INFO"
+format = "text"
+stream = "stdout"
+
+[log.file]
+# 파일에는 JSON Lines로 DEBUG까지. 상대 경로는 실행한 디렉터리(보통 저장소 루트) 기준이다.
+enabled = true
+level = "DEBUG"
+path = "logs/ex09.jsonl"
