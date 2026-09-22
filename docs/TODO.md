@@ -1,5 +1,7 @@
 # TODO
 
+> 우선순위: **10번(로그 모듈)이 최우선**이다. 1·8번은 사용자 결정 대기로 보류 중이다.
+
 1. TaskManager: task에서 예외가 발생했을때 TaskManager 단에서 처리 방법
 
 2. [해결] 같은 파생 요청을 서로 다른 심볼 집합으로 동시에 구독하면 먼저 구독한 쪽이 데이터를 전혀 받지 못하던 문제.
@@ -40,3 +42,8 @@
    `update()`는 빠지는 슬롯의 큐를 먼저 닫고 상위 구독은 나중에 갱신한다. 그 사이 상위가 보낸 데이터가 `SequenceSender`에서 `ClosedConnection`으로 터지면 `SendRouter`의 `TaskGroup`을 거쳐 원천 generator 태스크가 죽었다. 같은 상위 심볼을 다른 소비자(예: content_id가 같은 두 요청형 스테이지, ex08)가 계속 구독 중이면 합집합이 그대로라 재시작되지 않고, 그 소비자는 영영 데이터를 못 받는다. 7번 이전부터 있던 경합이다(재현 시나리오 기준 약 절반 확률).
    닫힌 슬롯은 받을 소비자가 없으므로 `SequenceSender`가 `ClosedConnection`을 삼키도록 했다. 일반적인 "Sender 하나의 실패가 공유 generator를 죽인다"는 문제는 1·8번의 예외 정책에 남는다.
    재현·검증: tests/test_transport.py의 `test_sequence_sender_drops_data_for_a_closed_slot`(경합이라 통합 테스트 대신 단위로 고정).
+
+10. 프로젝트 전반 로그 모듈(`logger.py`) 구현. 설계는 `docs/design.log.md`에 있다. `setting.toml`의
+    `[log]` 카테고리로 콘솔·파일·로그서버(자리만, 아직 미구현) 스위치를 설정한다. 여러 서버에 같은
+    코드가 뜨는 배포를 대비해 레코드마다 `service`/`host`/`pid`/`instance_id`로 발신처를 구분한다.
+    구현 시 `tests/test_logger.py`를 새로 추가한다.
