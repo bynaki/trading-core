@@ -66,7 +66,9 @@ uv run examples/main.py parallel      # 모든 예제를 공유 Domain에서 동
     기능을 추가했다고 README에 API 설명을 다시 채워 넣지 말 것.
   - `examples/ex01`~`ex08`의 README와 코드 docstring은 모두 현행 API 기준이다. 예제를 고치면
     같은 디렉터리의 README도 함께 고칠 것 — 지금은 어긋난 곳이 없다.
-- `TODO.md`에 남은 과제와 이미 해결한 불변식의 내력이 번호 순으로 적혀 있다. 특히 "require 콜백이
+  - 운영 문서(`TODO.md`, `HANDOFF.md`)는 저장소 루트가 아니라 **`docs/`**에 있다:
+    `docs/TODO.md`, `docs/HANDOFF.md`.
+- `docs/TODO.md`에 남은 과제와 이미 해결한 불변식의 내력이 번호 순으로 적혀 있다. 특히 "require 콜백이
   심볼에 따라 다른 상위 요청을 반환할 수 없다"(2번)는 제약은 현재 구조상 유효하다.
 - 열린 과제는 1·8번(TaskManager·사용자 콜백의 예외 정책)뿐이다. 정책이 **사용자 결정 대기** 중이므로
   임의로 구현하지 말 것. 제안된 안은 "정리를 끝까지 수행한 뒤 `ExceptionGroup`으로 재발생" +
