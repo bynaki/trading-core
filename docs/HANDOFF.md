@@ -6,20 +6,9 @@
 
 ## 지금 상태
 
-- 브랜치 `feat/log`, 작업 트리 깨끗함. `main`보다 5커밋 앞서 있고, 5커밋 모두
-  `origin/feat/log`에 push했다. **PR은 아직 만들지 않았다.**
+- 작업 브랜치는 `feat/log`다.
 - ruff check · format · pyright(0 errors) · pytest(125 passed) 모두 통과.
   `uv run examples/main.py serial`과 `parallel` 모두 ex01~ex09 완주, 오류 없음.
-
-`feat/log`가 `main`에 얹은 커밋(오래된 순):
-
-| 커밋 | 내용 |
-| --- | --- |
-| `7826de7` docs | `TODO.md`·`HANDOFF.md`를 `docs/`로 이동 |
-| `4714176` docs | 로그 모듈(`logger.py`) 설계 문서 `docs/design.log.md` 추가 |
-| `2f32ea3` feat | 로그 모듈 구현(`src/trading_core/logger.py`) + 테스트 35개 + `setting.example.toml` |
-| `29dac3c` docs | ex09(로그 모듈 사용 예제) 추가 |
-| (이 문서) docs | 새 세션 인수인계, TODO 11·12 승격, `AGENTS.md` 새 세션 안내 |
 
 ## 이번 세션에서 한 것 (요약)
 
@@ -51,19 +40,18 @@ TODO 10 — 프로젝트 전반 로그 모듈. 설계부터 구현·예제까지
 
 사용자가 "새 세션 시작 준비" 겸 문서 정리를 요청해서 함께 했다.
 
-- `docs/HANDOFF.md`: 이 파일을 이번 인수인계로 새로 썼다(직전 내용은 push 여부·예외 정책을 다루던
-  구버전이었고, 그 두 안건은 여전히 유효해 아래 "사용자 결정 대기"에 옮겨 왔다).
+- `docs/HANDOFF.md`: 이 파일을 이번 인수인계로 새로 썼다. 직전 버전의 안건 중 아직 유효한 예외
+  정책(TODO 1·8)은 아래 "사용자 결정 대기"에 옮겨 왔다.
 - `docs/TODO.md`: 10번 본문 속에 묻혀 있던 미완료 항목(로그서버 전송, `print` 이관)을 **11번·12번
   으로 승격**했다. 묻힌 채로 두면 10번이 `[해결]`이라 다음 세션이 지나칠 위험이 있었다. 1번은
   8번과 같은 주제인데 너무 짧아서 "8번 참고"를 붙였다. 헤더의 열린 과제 안내도 1·8·11·12로 갱신.
 - `AGENTS.md`: 새 "새 세션을 시작할 때" 절을 프로젝트 개요 바로 다음에 추가해 `docs/HANDOFF.md` →
-  `docs/TODO.md` 순으로 읽으라고 명시했다. "현재 저장소 상태"의 날짜(9/21→9/22)와 브랜치(`main`→
-  `feat/log`, push 여부, PR 미생성)를 갱신하고, 로그 모듈 항목이 11·12번을 가리키게 고쳤다.
+  `docs/TODO.md` 순으로 읽으라고 명시했다. "현재 저장소 상태"의 날짜(9/21→9/22)와 작업 브랜치
+  (`main`→`feat/log`)를 갱신하고, 로그 모듈 항목이 11·12번을 가리키게 고쳤다.
 
 ## 사용자 결정 대기
 
-1. **PR·병합** — PR을 만들지, `main`에 언제 합칠지. 묻지 않고 PR을 만들거나 병합하지 말 것.
-2. **TODO 1·8 예외 정책** — 여전히 미정이라 구현하지 말 것. 사용자에게 제시한 선택지:
+1. **TODO 1·8 예외 정책** — 여전히 미정이라 구현하지 말 것. 사용자에게 제시한 선택지:
    1. 로그만 남기고 계속 — 정리는 항상 끝나지만 오류를 놓치기 쉽다.
    2. **정리를 끝까지 한 뒤 모은 오류를 `ExceptionGroup`으로 재발생** — (추천) 정리 보장 +
       호출자도 오류를 본다. 현재 `TaskGroup` 스타일과 맞는다.
@@ -79,18 +67,15 @@ TODO 10 — 프로젝트 전반 로그 모듈. 설계부터 구현·예제까지
    - `domain.py` `SendRouter.__call__` — `TaskGroup` 안에서 Sender 하나가 던지면 전체가 실패.
    - `domain.py` `_task_sequence()` — `seq.invoke()`가 던지면 슬롯 태스크가 조용히 죽는다.
    - `helper.py` `TaskManager._task_wrapper()` / `on_task_failure()` — 현재 태스크 예외 처리 지점.
-3. **로그서버 실제 전송(TODO 11)** — `ServerSink.send_batch()`가 `NotImplementedError`다. 프로토콜(HTTP?
+2. **로그서버 실제 전송(TODO 11)** — `ServerSink.send_batch()`가 `NotImplementedError`다. 프로토콜(HTTP?
    WebSocket? UDP?), 재시도·백오프, `flush_interval` 타이머는 실제로 붙일 로그서버가 정해지면
    같이 정한다. `docs/design.log.md` 7절·"미결 사항" 참고.
-4. **기존 `print`를 로그 모듈로 옮기는 일(TODO 12)** — `helper.py`(`TaskManager`의 `[TASK ...]` 진단)와
+3. **기존 `print`를 로그 모듈로 옮기는 일(TODO 12)** — `helper.py`(`TaskManager`의 `[TASK ...]` 진단)와
    `domain.py`(경고 하나)에 `print`가 남아 있다. 이번 설계·구현 범위에서 의도적으로 뺐다
    (`docs/design.log.md` "비목표"). 옮길지, 옮긴다면 로그 레벨을 뭘로 할지 사용자와 정할 것.
 
 ## 작업 규칙 (계속 유효)
 
-- **커밋·push 전에 검증하고 사용자 승인을 받는다.** 검증 결과와 커밋할 파일·메시지를 보여 주고
-  승인 후에만 커밋한다. 계획 승인은 커밋 승인이 아니다. (`AGENTS.md` "코드 규약")
-- **커밋·push 전에 개인정보·비밀값·취약점을 검사**하고 결과를 승인 요청에 같이 보고한다.
 - 새 불변식을 테스트로 덮으면 수정을 되돌려 그 테스트만 깨지는지 확인한다(mutation testing).
   이번 세션은 로그 모듈 8개 동작 전부에 이 방식을 적용했다.
 

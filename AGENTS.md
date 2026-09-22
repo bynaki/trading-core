@@ -13,11 +13,16 @@ WebSocket 클라이언트가 아니라, 실시간 스트림을 다룰 때 반복
 
 ## 새 세션을 시작할 때
 
-이 파일 다음으로 **`docs/HANDOFF.md`**를 읽는다. 직전 세션이 어디서 멈췄는지, 지금 브랜치·커밋
-상태, 사용자에게 확인해야 할 것(push/PR 여부 등)이 있으면 거기 있다. 그다음 **`docs/TODO.md`**로
-남은 과제와 이미 해결한 불변식의 내력을 확인한다. `HANDOFF.md`는 일을 이어받아 끝내면 지워도
-되는 일회성 문서이고, `TODO.md`는 세션이 바뀌어도 계속 남는 백로그다 — 새로 안 것이나 남긴
-후속 작업은 `HANDOFF.md`가 아니라 `TODO.md`에 번호를 매겨 적어야 다음 세션도 볼 수 있다.
+이 파일 다음으로 **`docs/HANDOFF.md`**를 읽는다. 직전 세션이 어디서 멈췄는지, 작업 브랜치,
+사용자에게 확인해야 할 것이 있으면 거기 있다. 그다음 **`docs/TODO.md`**로 남은 과제와 이미 해결한
+불변식의 내력을 확인한다. `HANDOFF.md`는 일을 이어받아 끝내면 지워도 되는 일회성 문서이고,
+`TODO.md`는 세션이 바뀌어도 계속 남는 백로그다 — 새로 안 것이나 남긴 후속 작업은 `HANDOFF.md`가
+아니라 `TODO.md`에 번호를 매겨 적어야 다음 세션도 볼 수 있다.
+
+**`HANDOFF.md`와 `TODO.md`에는 커밋·push 상태를 적지 않는다.** 커밋 해시, 몇 커밋 앞섰는지,
+push했는지, PR·병합 여부 같은 것들이다. 문서를 커밋하는 순간이나 push하는 순간 바로 틀린 말이
+되기 때문이다. 이런 상태는 새 세션에서 `git status`·`git log`로 직접 확인한다. 커밋·push할 때
+사용자에게 묻는 규칙은 "코드 규약"에 있다.
 
 ## 환경
 
@@ -57,10 +62,9 @@ uv run examples/main.py parallel      # 모든 예제를 공유 Domain에서 동
 
 ## 현재 저장소 상태 (중요)
 
-2026-09-22 기준. 작업 브랜치는 **`feat/log`**다(로그 모듈, `docs/TODO.md` 10번). `main`보다 5커밋
-앞서 있고 모두 `origin/feat/log`에 push했다. **PR은 아직 만들지 않았다** — PR·병합은 사용자
-결정 대기다. `RequestModel`을 **instanter** 실행 경로로 확장한 `feat/request_model` 브랜치
-(아래 "instanter" 절)는 이미 `main`에 병합되어 사라졌다.
+2026-09-22 기준. 작업 브랜치는 **`feat/log`**다(로그 모듈, `docs/TODO.md` 10번). 커밋·push 상태는
+`git status`·`git log`로 확인한다. `RequestModel`을 **instanter** 실행 경로로 확장한
+`feat/request_model` 브랜치(아래 "instanter" 절)는 이미 `main`에 병합되어 사라졌다.
 
 - 등록 API 리팩터링(`definer.py` → `binder.py`)은 끝났고 `main`에 들어가 있다. `definer.py`
   (옛 `@generator` / `@task` / `@processor` 레지스트리)는 **삭제**되었고 코드에 옛 API 참조는 없다.
