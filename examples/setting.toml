@@ -1,0 +1,16 @@
+# 예제 공용 로그 설정. examples/main.py와 각 예제 run_ex.py의 main()이 configure(이 파일의 경로)로
+# 명시적으로 읽는다. 실행한 디렉터리의 setting.toml에 영향을 받지 않게 하기 위해서다.
+# 모든 키의 설명은 저장소 루트의 setting.example.toml에 있다. ex09만 자기 setting.toml을 따로 쓴다.
+
+[log]
+# TaskManager의 DEBUG 진단 로그는 누르고, 예제가 남기는 INFO 이상만 본다.
+level = "INFO"
+# 레코드의 발신처 이름. text.simple 콘솔에는 안 보인다. format을 "text"로 바꾸거나 파일 싱크를 켜면 보인다.
+service_name = "examples"
+
+[log.console]
+enabled = true
+level = "INFO"
+# 시각과 [service@host:pid]를 뺀 짧은 형식. 줄은 "INFO  ex05.origin: ..."처럼 레벨부터 시작한다.
+format = "text.simple"
+stream = "stdout"

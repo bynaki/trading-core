@@ -20,7 +20,8 @@
 ## 파일 구성
 
 - `ex05.py`: ex04를 최소화한 원천(`TickRequest`) · 파생(`PriceRequest`) 한 쌍.
-  각 콜백이 자신이 어떤 심볼로 (재)시작했는지 출력한다.
+  각 콜백이 자신이 어떤 심볼로 (재)시작했는지 로그로 남긴다. 로거가 계층마다 따로라
+  `ex05.require`·`ex05.origin`·`ex05.dependent`로 구분된다.
 - `run_ex.py`: A·B 두 구독자를 시간차로 붙였다 떼며 단계별 수신 건수를 세고 판정한다.
 
 ## 시나리오
@@ -46,41 +47,39 @@ uv run python examples/ex05/run_ex.py
 ```
 
 ```text
------ 1단계: A가 {"BTC"} 단독 구독 -----
-[REQUIRE]   하위 ['BTC'] -> 상위 ['BTC/USD']
-[ORIGIN]    generator (재)시작 — 상위 구독 심볼 = ['BTC/USD']
-[DEPENDENT] generator (재)시작 — 하위 구독 심볼 = ['BTC']
-  [수신 A] BTC = 68,000.0 (seq=0)
-  ...
-
------ 2단계: A{"BTC"} + B{"ETH"} 동시 구독 -----
-[REQUIRE]   하위 ['BTC', 'ETH'] -> 상위 ['BTC/USD', 'ETH/USD']
-[ORIGIN]    generator (재)시작 — 상위 구독 심볼 = ['BTC/USD', 'ETH/USD']
-[DEPENDENT] generator (재)시작 — 하위 구독 심볼 = ['BTC', 'ETH']
-  [수신 A] BTC = 68,000.0 (seq=0)
-  [수신 B] ETH = 3,200.0 (seq=0)
-  ...
-
------ 3단계: B 구독 해제, A만 남음 -----
-[REQUIRE]   하위 ['BTC'] -> 상위 ['BTC/USD']
-[ORIGIN]    generator (재)시작 — 상위 구독 심볼 = ['BTC/USD']
-[DEPENDENT] generator (재)시작 — 하위 구독 심볼 = ['BTC']
-  [수신 A] BTC = 68,000.0 (seq=0)
-  ...
-
-===== 단계별 수신 건수 =====
-                                           A       B
-1단계: A가 {"BTC"} 단독 구독               4       0
-2단계: A{"BTC"} + B{"ETH"} 동시 구독       6       6
-3단계: B 구독 해제, A만 남음               4       0
-
-===== 판정 =====
-정상: A는 B가 붙은 뒤에도 계속 데이터를 받는다.
-정상: B가 떠난 뒤 A의 상위 구독이 남아 있다.
+ex05: ----- 1단계: A가 {"BTC"} 단독 구독 -----
+ex05.require: 심볼 변환 {lower=['BTC'], upper=['BTC/USD']}
+ex05.origin: generator (재)시작 {upper=['BTC/USD']}
+ex05.dependent: generator (재)시작 {lower=['BTC']}
+ex05: 수신 A {symbol=BTC, price=68000.0, seq=0}
+...
+ex05: ----- 2단계: A{"BTC"} + B{"ETH"} 동시 구독 -----
+ex05.require: 심볼 변환 {lower=['BTC', 'ETH'], upper=['BTC/USD', 'ETH/USD']}
+ex05.origin: generator (재)시작 {upper=['BTC/USD', 'ETH/USD']}
+ex05.dependent: generator (재)시작 {lower=['BTC', 'ETH']}
+ex05: 수신 A {symbol=BTC, price=68000.0, seq=0}
+ex05: 수신 B {symbol=ETH, price=3200.0, seq=0}
+...
+ex05: ----- 3단계: B 구독 해제, A만 남음 -----
+ex05.require: 심볼 변환 {lower=['BTC'], upper=['BTC/USD']}
+ex05.origin: generator (재)시작 {upper=['BTC/USD']}
+ex05.dependent: generator (재)시작 {lower=['BTC']}
+ex05: 수신 A {symbol=BTC, price=68000.0, seq=0}
+...
+ex05: ===== 단계별 수신 건수 =====
+ex05:                                            A       B
+ex05: 1단계: A가 {"BTC"} 단독 구독               4       0
+ex05: 2단계: A{"BTC"} + B{"ETH"} 동시 구독       6       6
+ex05: 3단계: B 구독 해제, A만 남음               4       0
+ex05: ===== 판정 =====
+ex05: 정상: A는 B가 붙은 뒤에도 계속 데이터를 받는다.
+ex05: 정상: B가 떠난 뒤 A의 상위 구독이 남아 있다.
 ```
 
-**`[DEPENDENT]` 줄과 `[ORIGIN]` 줄의 심볼이 서로 대응하는지**가 관전 포인트다. 2단계에서
-하위가 `['BTC', 'ETH']`면 상위도 `['BTC/USD', 'ETH/USD']`여야 한다. 위 출력에서는 세 단계
+(줄 앞의 레벨(`INFO  `)은 뺐다.) 판정이 `회귀:`로 바뀌면 그 줄은 `ERROR` 레벨로 찍힌다.
+
+**`ex05.dependent` 줄의 `lower`와 `ex05.origin` 줄의 `upper`가 서로 대응하는지**가 관전
+포인트다. 2단계에서 `lower`가 `['BTC', 'ETH']`면 `upper`도 `['BTC/USD', 'ETH/USD']`여야 한다. 위 출력에서는 세 단계
 모두 두 줄이 맞물려 있다.
 
 두 줄이 어긋나면 파생 스테이지는 A에게 BTC를 넘길 준비가 되어 있는데 상위에 BTC를 요청한

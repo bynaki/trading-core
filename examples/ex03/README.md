@@ -27,7 +27,7 @@
 ## `Domain.stage()` 사용 흐름
 
 ```python
-sender = TestSender()
+sender = TestSender("symbols01")
 req = PriceReq(ohlc="close")
 
 async with domain.stage(req, sender) as stage:
@@ -55,9 +55,10 @@ async with domain.stage(req, sender) as stage:
 - 현재 개별 스테이지가 요청한 `symbols`
 - `domain.get_origin_stage(content_id).output.symbols`에 저장된 전체 합집합
 
-개별 심볼 집합이 원천 합집합에 포함된다는 assertion으로 공유 상태를 확인한다.
+두 값은 `심볼 추가`·`심볼 제거` 줄의 `symbols`·`origin` 필드로 남는다. 개별 심볼 집합이
+원천 합집합에 포함된다는 assertion으로 공유 상태를 확인한다.
 `SendRouter`는 원천에서 무작위로 선택된 심볼의 데이터를 그 심볼을 구독한 sender에만
-전달한다.
+전달한다. `수신 symbols01`·`수신 symbols02` 줄로 어느 sender가 받았는지 보인다.
 
 ## 정리 시점
 

@@ -28,12 +28,12 @@ content_id 단위로 공유된다. 공유가 사라진 것이 아니라 **공유
 ## 파일 구성
 
 - `ex08.py`: 원천 `BeatReq`와 요청형 `WatchReq` 한 쌍. 양쪽 init 콜백이 자기가 몇 번째로
-  불렸는지 출력한다.
+  불렸는지 로그로 남긴다. 원천은 `ex08.beat`, 요청형은 `ex08.watch` 로거다.
 - `run_ex.py`: 내용이 같은 `WatchReq` 두 개를 같은 심볼 `{"BTC"}`로 동시에 구독한다.
 
 ## 예제의 흐름
 
-1. `WatchReq(quote="USD")`를 두 개 만든다. `content_id`를 비교해 같음을 먼저 출력한다.
+1. `WatchReq(quote="USD")`를 두 개 만든다. `content_id`를 비교해 같음을 먼저 로그로 남긴다.
 2. 소비자 A와 B가 각각 그 요청을 `{"BTC"}`로 구독한다.
 3. `WatchCtx`가 **두 번** 만들어지고 bind 콜백도 **두 번** 불린다. 같은 content_id, 같은
    심볼인데도 그렇다.
@@ -51,31 +51,31 @@ uv run python examples/ex08/run_ex.py
 ```
 
 ```text
-[ex08] content_id가 같은가: True
-[ex08] WatchCtx 생성 #1 - content_id=ex08@WatchReq:3ab87c06fb23bd9d
-[ex08] bind   ctx#1 symbol=BTC
-[ex08] WatchCtx 생성 #2 - content_id=ex08@WatchReq:3ab87c06fb23bd9d
-[ex08] bind   ctx#2 symbol=BTC
-[ex08] BeatCtx 생성 #1
-  [수신 B] ctx#2 seen=1 BTC=100.0
-  [수신 A] ctx#1 seen=1 BTC=100.0
-
------ 원천 `BeatReq` 스테이지: 공유됨, 상위 심볼={'BTC/USD'} -----
------ 요청형 `WatchReq` 스테이지: 공유 레지스트리에 없음 -----
-
-  [수신 B] ctx#2 seen=2 BTC=101.0
-  [수신 A] ctx#1 seen=2 BTC=101.0
-  [수신 B] ctx#2 seen=3 BTC=102.0
-  [수신 A] ctx#1 seen=3 BTC=102.0
-[ex08] unbind ctx#2 symbol=BTC
-[ex08] unbind ctx#1 symbol=BTC
-[ex08] detach ctx#2 seen=3
-[ex08] detach ctx#1 seen=3
+ex08: ━━━━━━━━━━ 시작: 같은 content_id라도 RequestModel은 공유되지 않는다 ━━━━━━━━━━
+ex08: content_id가 같은가 {same=True}
+ex08.watch: WatchCtx 생성 #1 {content_id=ex08.ex08@WatchReq:3ab87c06fb23bd9d}
+ex08.watch: bind   ctx#1 {symbol=BTC}
+ex08.watch: WatchCtx 생성 #2 {content_id=ex08.ex08@WatchReq:3ab87c06fb23bd9d}
+ex08.watch: bind   ctx#2 {symbol=BTC}
+ex08.beat: BeatCtx 생성 #1
+ex08: 수신 A {ctx=1, seen=1, symbol=BTC, price=100.0}
+ex08: ----- 원천 `BeatReq` 스테이지: 공유됨 ----- {upper=['BTC/USD']}
+ex08: ----- 요청형 `WatchReq` 스테이지: 공유 레지스트리에 없음 -----
+ex08: 수신 B {ctx=2, seen=1, symbol=BTC, price=100.0}
+ex08: 수신 A {ctx=1, seen=2, symbol=BTC, price=101.0}
+ex08: 수신 B {ctx=2, seen=2, symbol=BTC, price=101.0}
+ex08: 수신 A {ctx=1, seen=3, symbol=BTC, price=102.0}
+ex08: 수신 B {ctx=2, seen=3, symbol=BTC, price=102.0}
+ex08.watch: unbind ctx#1 {symbol=BTC}
+ex08.watch: unbind ctx#2 {symbol=BTC}
+ex08.watch: detach ctx#1 {seen=3}
+ex08.watch: detach ctx#2 {seen=3}
+ex08: ━━━━━━━━━━ 끝 ━━━━━━━━━━
 ```
 
-(위는 `TaskManager`의 `[TASK ...]` 진단 출력을 뺀 것이다. content_id 앞의 모듈 이름은
-실행 방식에 따라 달라진다 — `examples/main.py ex08`로 돌리면 `ex08.ex08@WatchReq`가 된다.
-중요한 것은 **두 줄의 content_id가 서로 같다**는 점이다.)
+(줄 앞의 레벨(`INFO  `)은 뺐다.) A·B 줄의 순서는 실행마다 다르다. content_id 앞의 모듈 이름은
+실행 방식에 따라 달라진다 — `run_ex.py`를 직접 돌리면 `ex08@WatchReq`가 된다. 중요한 것은
+**두 줄의 content_id가 서로 같다**는 점이다.
 
 ## 관전 포인트
 
@@ -94,7 +94,8 @@ uv run python examples/ex08/run_ex.py
 
 **두 번째 구독이 원천을 재시작시키지 않는다.** B가 붙어도 상위 합집합은
 `{"BTC/USD"}` 그대로다. 3번 불변식("합집합이 바뀔 때만 재시작")이 그대로 적용되어
-`[TASK SUBMIT]`은 `BeatReq` 이름으로 한 번만 찍힌다. A가 먼저 빠질 때도 마찬가지로
+`BeatReq` 이름의 태스크 제출은 한 번뿐이다(`TaskManager`의 태스크 로그는 DEBUG라, 보려면
+`examples/setting.toml`의 두 `level`을 `"DEBUG"`로 바꾼다). A가 먼저 빠질 때도 마찬가지로
 재시작이 없고, B까지 빠져 합집합이 비어야 원천이 정리된다.
 
 **unbind와 detach가 스테이지마다 따로 불린다.** 슬롯도 컨텍스트도 스테이지 소유이므로

@@ -8,6 +8,10 @@ from trading_core import (
     get_model_id,
     initialize,
 )
+from trading_core.logger import get_logger
+
+log = get_logger("ex01.count")
+"""원천 binder의 로거. 이름을 직접 주어 실행 방식과 관계없이 `ex01.` 접두를 유지한다."""
 
 
 class CountReq(GenerateModel):
@@ -47,12 +51,11 @@ async def _(req: CountReq, symbols: set[str]):
             count += 1
             await sleep(0.5)
     finally:
-        print(f"Update 별로 리소스를 정리할 수 있다 - count: {count}")
+        log.info("업데이트 단위 정리 (generator finally)", count=count)
 
 
 @gen01.detached
 async def _(req: CountReq):
     """마지막 구독이 사라질 때 스테이지 단위 자원을 정리한다."""
 
-    print(f"Detached Stage - {get_model_id(req)}")
-    print("Stage 별로 리소스를 정리할 수 있다.")
+    log.info("스테이지 단위 정리 (detached)", model_id=get_model_id(req))

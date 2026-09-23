@@ -17,7 +17,11 @@ from asyncio import sleep
 from typing import Literal
 
 from trading_core import DataModel, DependentModel, GenerateModel, initialize
+from trading_core.logger import get_logger
 from trading_core.model import Receiver, cast_model
+
+log = get_logger("ex04.ohlc")
+"""파생 binder의 로거. 이름을 직접 주어 실행 방식과 관계없이 `ex04.` 접두를 유지한다."""
 
 _SYMBOL_PATTERN = re.compile(r"^([A-Z0-9]+)/([A-Z0-9]+)$")
 
@@ -611,7 +615,7 @@ async def _(ctx: OHLCRequest, symbols: set[str], recv: Receiver):
             casted = cast_model(data, BinanceData)
             symbol = base_of(casted.symbol)
             if symbol not in symbols:
-                print(f"warning: 요청한 심볼이 아니다. - {symbol}, {symbols}")
+                log.warning("요청한 심볼이 아니다", symbol=symbol, symbols=sorted(symbols))
                 continue
             yield OHLCData(
                 symbol=symbol,
@@ -625,6 +629,6 @@ async def _(ctx: OHLCRequest, symbols: set[str], recv: Receiver):
             casted_ohlc = cast_model(data, OHLCData)
             symbol = base_of(casted_ohlc.symbol)
             if symbol not in symbols:
-                print(f"warning: 요청한 심볼이 아니다. - {symbol}")
+                log.warning("요청한 심볼이 아니다", symbol=symbol, symbols=sorted(symbols))
                 continue
             yield casted_ohlc.model_copy(update={"symbol": symbol})

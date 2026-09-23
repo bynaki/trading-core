@@ -41,7 +41,11 @@ level = "INFO"
 # 콘솔 출력.
 enabled = true
 level = "DEBUG"
-# "text": 사람이 읽는 한 줄 형식. [service@host:pid] 접두가 붙는다.
+# "text": 사람이 읽는 한 줄 형식. 시각과 [service@host:pid] 접두가 붙는다.
+# "text.simple": "text"에서 시각과 [service@host:pid]를 뺀 짧은 형식. 레벨부터 시작한다.
+#                한 프로세스의 콘솔을 로컬에서 볼 때 쓴다. 발신처는 파일 싱크에 그대로 남는다.
+# 두 text 형식 모두 fields가 짧으면 첫 줄 끝에 {k=v}로 붙이고, 60자를 넘거나 값이 dict면
+# 아래 줄에 indent=2 JSON으로 펼친다.
 # "json": 파일과 같은 JSON 한 줄 형식. 콘솔 출력을 수집기로 넘길 때 쓴다.
 format = "text"
 # "stderr" | "stdout"

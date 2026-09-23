@@ -28,7 +28,7 @@ symbols = {"BTC", "USDT", "ETH", "XRP"}
 
 async with domain.request(req, symbols) as stream:
     async for data in stream:
-        print(data.model_dump_json(indent=2))
+        log.info("수신", symbol=data.symbol, count=data.count)
         if data.count == 10:
             break
 ```
@@ -49,6 +49,19 @@ async with domain.request(req, symbols) as stream:
 
 따라서 `async for`에서 `break`하더라도 `async with`를 빠져나오면 정리 절차가
 이어진다. `Domain` 자체는 실행이 끝난 뒤 `stop()`으로 종료해야 한다.
+
+실행하면 소비자(`ex01`)가 받은 10건 뒤에 원천 binder(`ex01.count`)의 정리 줄이 이 순서로
+찍힌다. 심볼 순서는 실행마다 다르다. (줄 앞의 레벨(`INFO  `)은 뺐다.)
+
+```text
+ex01: ━━━━━━━━━━ 시작: Domain.request()로 카운트 스트림 받기 ━━━━━━━━━━
+ex01: 수신 {symbol=ETH, count=1}
+...
+ex01: 수신 {symbol=XRP, count=10}
+ex01.count: 업데이트 단위 정리 (generator finally) {count=10}
+ex01.count: 스테이지 단위 정리 (detached) {model_id=CountReq@ex01.ex01:…}
+ex01: ━━━━━━━━━━ 끝 ━━━━━━━━━━
+```
 
 ## 알아둘 점
 

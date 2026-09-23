@@ -9,6 +9,10 @@
 
 세 방식 모두 하나의 `Domain`을 공유한다. `parallel`은 옛 `main.py`의 동작과 같고,
 `serial`은 예제끼리 스테이지가 겹치지 않은 상태를 각각 관찰할 때 쓴다.
+
+출력은 모두 `trading_core.logger`로 남긴다. 시작할 때 예제 공용 설정(`examples/setting.toml`)으로
+구성하며, 줄마다 붙는 로거 이름(`ex01`, `ex05.origin` 등)으로 어느 예제의 어느 부분이 남긴
+줄인지 구분한다. `parallel`처럼 여러 예제의 줄이 섞여도 이 이름으로 가려 볼 수 있다.
 """
 
 import sys
@@ -20,14 +24,18 @@ from pathlib import Path
 from typing import Any, cast
 
 from trading_core import Domain
+from trading_core.logger import configure, get_logger
 
 EXAMPLES_DIR = Path(__file__).resolve().parent
+SETTINGS = EXAMPLES_DIR / "setting.toml"
 RUN_MODULE = "run_ex"
 RUN_ATTR = "run_ex"
 SERIAL = "serial"
 PARALLEL = "parallel"
 
 type RunEx = Callable[[Domain], Coroutine[Any, Any, None]]
+
+log = get_logger("examples")
 
 
 def discover_examples() -> list[str]:
@@ -58,21 +66,24 @@ def load_run_ex(name: str) -> RunEx:
     return cast(RunEx, runner)
 
 
-async def run_examples(runners: list[RunEx], parallel: bool) -> None:
+async def run_examples(runners: dict[str, RunEx], parallel: bool) -> None:
     """공유 `Domain`을 시작하고 예제 실행 함수를 순차 또는 동시에 돌린다."""
 
+    mode = PARALLEL if parallel else SERIAL
+    log.info(f"예제 실행 ({mode}): {', '.join(runners)}\n")  # 끝의 "\n"은 첫 예제 앞의 빈 줄
     domain = Domain()
     await domain.start()
     try:
         if parallel:
             async with TaskGroup() as tg:
-                for runner in runners:
+                for runner in runners.values():
                     tg.create_task(runner(domain))
         else:
-            for runner in runners:
+            for runner in runners.values():
                 await runner(domain)
     finally:
         await domain.stop()
+    log.info("예제 실행 끝")
 
 
 def main() -> None:
@@ -95,7 +106,8 @@ def main() -> None:
     target = cast(str, parser.parse_args().target)
 
     selected = names if target in (SERIAL, PARALLEL) else [target]
-    runners = [load_run_ex(name) for name in selected]
+    runners = {name: load_run_ex(name) for name in selected}
+    configure(SETTINGS)
     run(run_examples(runners, target == PARALLEL))
 
 

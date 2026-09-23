@@ -22,6 +22,7 @@ import threading
 import tomllib
 import traceback
 from collections import deque
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from itertools import islice
@@ -59,7 +60,7 @@ class _Section(BaseModel):
 class ConsoleSettings(_Section):
     enabled: bool = True
     level: LevelName = "DEBUG"
-    format: Literal["json", "text"] = "text"
+    format: Literal["json", "text", "text.simple"] = "text"
     stream: Literal["stdout", "stderr"] = "stderr"
 
 
@@ -275,23 +276,66 @@ class JsonFormatter(logging.Formatter):
         return json.dumps(record_to_dict(record, self._identity), ensure_ascii=False, default=repr)
 
 
+_INLINE_FIELDS_MAX = 60
+"""text 형식에서 `{k=v}`를 첫 줄에 붙여 둘 최대 길이. 넘으면 JSON 블록으로 펼친다."""
+
+
+def _pretty_json(value: Any) -> str:
+    """indent=2 JSON. 첫 줄 다음부터 두 칸 들여 레코드의 첫 줄 아래에 붙인다."""
+
+    return json.dumps(value, ensure_ascii=False, indent=2, default=repr).replace("\n", "\n  ")
+
+
 class TextFormatter(logging.Formatter):
-    """사람이 읽는 콘솔 형식. 여러 서버의 줄이 섞여도 구분되도록 `[instance_id]`를 넣는다."""
+    """사람이 읽는 콘솔 형식. 여러 서버의 줄이 섞여도 구분되도록 `[instance_id]`를 넣는다.
+
+    fields는 짧으면 첫 줄 끝에 `{k=v}`로 붙이고, 길거나 dict면 아래 줄에 indent=2 JSON으로 펼친다.
+    """
 
     def __init__(self, identity: Identity):
         super().__init__()
         self._identity = identity
 
+    def _head(self, d: dict[str, Any]) -> str:
+        return f"{d['ts']} {d['level']:<5} [{d['instance_id']}] "
+
     def format(self, record: logging.LogRecord) -> str:
         d = record_to_dict(record, self._identity)
-        line = f"{d['ts']} {d['level']:<5} [{d['instance_id']}] {d['logger']}: {d['msg']}"
+        line = f"{self._head(d)}{d['logger']}: {d['msg']}"
         fields: dict[str, Any] = d["fields"]
-        if fields:
-            line += " {" + ", ".join(f"{k}={v}" for k, v in fields.items()) + "}"
+        # 스칼라·리스트는 한 줄 `{k=v}`로 붙이되, 길면 한 블록으로 묶어 아래 줄에 펼친다.
+        # 비어 있지 않은 dict(모델 덤프 등)는 항상 이름을 달고 아래 줄에 따로 펼친다.
+        inline = {k: v for k, v in fields.items() if not (isinstance(v, dict) and v)}
+        if inline:
+            text = "{" + ", ".join(f"{k}={v}" for k, v in inline.items()) + "}"
+            if len(text) <= _INLINE_FIELDS_MAX:
+                line += " " + text
+            else:
+                line += "\n  " + _pretty_json(inline)
+        for k, v in fields.items():
+            if k not in inline:
+                line += f"\n  {k} = " + _pretty_json(v)
         exc: dict[str, str] | None = d["exc"]
         if exc is not None:
             line += "\n" + exc["traceback"].rstrip()
         return line
+
+
+class SimpleTextFormatter(TextFormatter):
+    """시각과 `[instance_id]`를 뺀 짧은 콘솔 형식(`"text.simple"`). 레벨부터 시작한다.
+
+    한 프로세스의 콘솔을 로컬에서 볼 때(예제 등) 쓴다. 발신처가 필요하면 `"text"`나 파일을 본다.
+    """
+
+    def _head(self, d: dict[str, Any]) -> str:
+        return f"{d['level']:<5} "
+
+
+_CONSOLE_FORMATTERS: dict[str, Callable[[Identity], logging.Formatter]] = {
+    "json": JsonFormatter,
+    "text": TextFormatter,
+    "text.simple": SimpleTextFormatter,
+}
 
 
 # ---------------------------------------------------------------------------
@@ -389,7 +433,7 @@ def _build_sinks(settings: LogSettings, identity: Identity) -> list[logging.Hand
             stream = sys.stdout if settings.console.stream == "stdout" else sys.stderr
             console = ConsoleSink(stream)
             console.setLevel(settings.console.level)
-            fmt = JsonFormatter if settings.console.format == "json" else TextFormatter
+            fmt = _CONSOLE_FORMATTERS[settings.console.format]
             console.setFormatter(fmt(identity))
             sinks.append(console)
         if settings.file.enabled:

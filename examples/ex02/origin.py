@@ -3,6 +3,10 @@
 from asyncio import sleep
 
 from trading_core import DataModel, GenerateModel, initialize
+from trading_core.logger import get_logger
+
+log = get_logger("ex02.origin")
+"""원천 binder의 로거. 이름을 직접 주어 실행 방식과 관계없이 `ex02.` 접두를 유지한다."""
 
 flower_names = [
     "Rose",
@@ -94,7 +98,7 @@ async def _(ctx: NamingAllContext, symbols: set[str]):
     """정렬한 심볼을 순환하며 세 종류의 이름을 한 레코드로 발행한다."""
 
     ctx.count += 1
-    print(f"!!!!!!! {ctx.count} Updating NamingAll Stage")
+    log.info("generator 시작", run=ctx.count, symbols=sorted(symbols))
     symbol_list = list(symbols)
     symbol_list.sort()
     i = 0
@@ -113,4 +117,4 @@ async def _(ctx: NamingAllContext):
     """마지막 원천 구독이 사라지면 공유 컨텍스트를 분리한다."""
 
     ctx.detach()
-    print("******* Detached NamingAll Stage")
+    log.info("스테이지 분리 (detached)")

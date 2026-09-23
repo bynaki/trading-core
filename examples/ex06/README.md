@@ -19,7 +19,8 @@ ex05가 파생 스테이지가 상위에 **무엇을** 등록하는지(합집합
 ## 파일 구성
 
 - `ex06.py`: 최소한의 원천(`FeedRequest`) · 파생(`QuoteRequest`) 한 쌍. 각 generator가
-  자신이 몇 회차로 시작했는지 출력하고 `GEN_STARTS`에 기록한다.
+  자신이 몇 회차로 시작했는지 로그로 남기고 `GEN_STARTS`에 기록한다. 로거가 계층마다
+  따로라 `ex06.require`·`ex06.origin`·`ex06.dependent`로 구분된다.
 - `run_ex.py`: A·B 두 구독자로 합집합을 네 번 바꾸며 단계별 재시작 횟수를 센다.
 
 ## 시나리오
@@ -45,51 +46,50 @@ uv run python examples/ex06/run_ex.py
 ```
 
 ```text
------ 1단계: A가 {"BTC"} 구독 -----
-[REQUIRE]   하위 ['BTC'] -> 상위 ['BTC/USD']
-[ORIGIN]    generator 1회차 시작 — 상위 구독 심볼 = ['BTC/USD']
-[DEPENDENT] generator 1회차 시작 — 하위 구독 심볼 = ['BTC']
-  [수신 A] BTC = 68,000.0 (seq=0)
-  ...
-  [수신 A] BTC = 68,003.0 (seq=3)
-
------ 2단계: B가 {"BTC"} 추가 구독 — 합집합 그대로 -----
-  [수신 A] BTC = 68,004.0 (seq=4)
-  [수신 B] BTC = 68,004.0 (seq=4)
-  ...
-
------ 3단계: B가 {"BTC", "ETH"}로 교체 — 합집합 확장 -----
-[REQUIRE]   하위 ['BTC', 'ETH'] -> 상위 ['BTC/USD', 'ETH/USD']
-[ORIGIN]    generator 2회차 시작 — 상위 구독 심볼 = ['BTC/USD', 'ETH/USD']
-[DEPENDENT] generator 2회차 시작 — 하위 구독 심볼 = ['BTC', 'ETH']
-  [수신 A] BTC = 68,000.0 (seq=0)
-  ...
-
------ 4단계: B 구독 해제 — 합집합 축소 -----
-[REQUIRE]   하위 ['BTC'] -> 상위 ['BTC/USD']
-[ORIGIN]    generator 3회차 시작 — 상위 구독 심볼 = ['BTC/USD']
-[DEPENDENT] generator 3회차 시작 — 하위 구독 심볼 = ['BTC']
-  [수신 A] BTC = 68,000.0 (seq=0)
-  ...
-
-===== 단계별 재시작 횟수와 수신 건수 =====
-                                                ORIGIN     DEP       A       B
-1단계: A가 {"BTC"} 구독                              1       1       4       0
-2단계: B가 {"BTC"} 추가 구독 — 합집합 그대로         0       0       4       4
-3단계: B가 {"BTC", "ETH"}로 교체 — 합집합 확장       1       1       4       8
-4단계: B 구독 해제 — 합집합 축소                     1       1       4       0
-
-===== 판정 =====
-정상: 이미 합집합에 있는 심볼로 구독을 붙이면 두 계층 모두 재시작하지 않는다.
-정상: 재시작 없이도 새 구독자에게 데이터가 간다.
-정상: 기존 구독자의 스트림이 끊기지 않는다.
-정상: 합집합이 넓어지거나 좁아지면 두 계층이 한 번씩 재시작한다.
+ex06: ----- 1단계: A가 {"BTC"} 구독 -----
+ex06.require: 심볼 변환 {lower=['BTC'], upper=['BTC/USD']}
+ex06.origin: generator 1회차 시작 {upper=['BTC/USD']}
+ex06.dependent: generator 1회차 시작 {lower=['BTC']}
+ex06: 수신 A {symbol=BTC, price=68000.0, seq=0}
+...
+ex06: 수신 A {symbol=BTC, price=68003.0, seq=3}
+ex06: ----- 2단계: B가 {"BTC"} 추가 구독 — 합집합 그대로 -----
+ex06: 수신 B {symbol=BTC, price=68004.0, seq=4}
+ex06: 수신 A {symbol=BTC, price=68004.0, seq=4}
+...
+ex06: ----- 3단계: B가 {"BTC", "ETH"}로 교체 — 합집합 확장 -----
+ex06.require: 심볼 변환 {lower=['BTC', 'ETH'], upper=['BTC/USD', 'ETH/USD']}
+ex06.origin: generator 2회차 시작 {upper=['BTC/USD', 'ETH/USD']}
+ex06.dependent: generator 2회차 시작 {lower=['BTC', 'ETH']}
+ex06: 수신 B {symbol=BTC, price=68000.0, seq=0}
+ex06: 수신 A {symbol=BTC, price=68000.0, seq=0}
+...
+ex06: ----- 4단계: B 구독 해제 — 합집합 축소 -----
+ex06.require: 심볼 변환 {lower=['BTC'], upper=['BTC/USD']}
+ex06.origin: generator 3회차 시작 {upper=['BTC/USD']}
+ex06.dependent: generator 3회차 시작 {lower=['BTC']}
+ex06: 수신 A {symbol=BTC, price=68000.0, seq=0}
+...
+ex06.require: 심볼 변환 {lower=[], upper=[]}
+ex06: ===== 단계별 재시작 횟수와 수신 건수 =====
+ex06:                                                 ORIGIN     DEP       A       B
+ex06: 1단계: A가 {"BTC"} 구독                              1       1       4       0
+ex06: 2단계: B가 {"BTC"} 추가 구독 — 합집합 그대로         0       0       4       4
+ex06: 3단계: B가 {"BTC", "ETH"}로 교체 — 합집합 확장       1       1       4       8
+ex06: 4단계: B 구독 해제 — 합집합 축소                     1       1       4       0
+ex06: ===== 판정 =====
+ex06: 정상: 이미 합집합에 있는 심볼로 구독을 붙이면 두 계층 모두 재시작하지 않는다.
+ex06: 정상: 재시작 없이도 새 구독자에게 데이터가 간다.
+ex06: 정상: 기존 구독자의 스트림이 끊기지 않는다.
+ex06: 정상: 합집합이 넓어지거나 좁아지면 두 계층이 한 번씩 재시작한다.
 ```
+
+(줄 앞의 레벨(`INFO  `)은 뺐다.) 판정이 `회귀:`로 바뀌면 그 줄은 `ERROR` 레벨로 찍힌다.
 
 ## 관전 포인트
 
-**2단계에 로그가 세 줄 없다.** `[REQUIRE]` · `[ORIGIN]` · `[DEPENDENT]`가 모두 찍히지
-않는다. 셋 다 재시작 경로에서만 나오는 줄이기 때문이다. 그런데도 `[수신 B]`는 바로
+**2단계에 로그가 세 줄 없다.** `ex06.require` · `ex06.origin` · `ex06.dependent`가 모두
+찍히지 않는다. 셋 다 재시작 경로에서만 나오는 줄이기 때문이다. 그런데도 `수신 B`는 바로
 나타난다 — 구독 등록과 generator 재시작이 별개의 일이라는 뜻이다.
 
 **`seq`가 이어지는지 끊기는지 보라.** 재시작하면 generator가 새로 만들어져 `seq`가 0부터
@@ -138,6 +138,6 @@ async def update(sender: Sender, symbols: set[str]):
 - 2단계에서 B가 A와 **겹치는** 심볼을 구독하는 것이 핵심이다. `{"ETH"}`처럼 새 심볼이면
   합집합이 넓어져 재시작한다(그 경우가 ex05다).
 - 마지막에 A의 구독까지 사라지면 합집합이 빈 집합이 되어 스테이지가 정리된다. 로그
-  끝의 `[REQUIRE] 하위 [] -> 상위 []`가 그 신호다.
+  끝의 `ex06.require: 심볼 변환 {lower=[], upper=[]}`가 그 신호다.
 - 모의 가격은 `seq`를 더한 값이라 재시작 여부가 값에도 드러난다. 재시작 후에는 다시
   `68,000.0`부터 시작한다.

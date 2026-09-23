@@ -81,7 +81,7 @@ log.error("바인더 콜백 실패", exc_info=True, req_id=req.get_model_inst_id
                                                               SimpleQueue
                                                                    │
                                                      QueueListener (전용 스레드 하나)
-                                                     ├── ConsoleSink  (StreamHandler, json | text)
+                                                     ├── ConsoleSink  (StreamHandler, json | text | text.simple)
                                                      ├── FileSink     (TimedRotatingFileHandler, .jsonl)
                                                      └── ServerSink   (자리만: 배치 버퍼 + send_batch 훅)
 ```
@@ -152,6 +152,22 @@ log.error("바인더 콜백 실패", exc_info=True, req_id=req.get_model_inst_id
   ```
   `[service@host:pid]` 접두를 넣어, 여러 서버의 콘솔 로그를 한 곳(예: 로그 집계 뷰어)에서 섞어 봐도
   어디서 온 줄인지 바로 구분되게 한다.
+- **콘솔 text.simple 형식**은 text에서 시각과 `[service@host:pid]`를 뺐다. 한 프로세스의 콘솔을
+  로컬에서 볼 때(예제 등) 쓴다. fields와 트레이스백은 text와 같다:
+  ```
+  INFO  trading_core.domain: 구독 갱신 {symbol=BTC, union_size=3}
+  ```
+- 두 text 형식의 **fields 표기**: 스칼라·리스트는 첫 줄 끝에 `{k=v}`로 붙인다. 그 부분이 60자를
+  넘으면 스칼라·리스트를 **한 블록으로 묶어** 아래 줄에 indent=2 JSON으로 펼친다. 비어 있지 않은
+  dict(모델 덤프 등)는 길이와 상관없이 `이름 = {...}` 블록으로 따로 펼친다. 블록은 두 칸 들여 쓰고,
+  트레이스백은 블록 뒤에 붙는다:
+  ```
+  INFO  app.order: 주문 접수 {id=7}
+    order = {
+      "symbol": "BTC",
+      "qty": 1.5
+    }
+  ```
 
 ## 5. 다중 서버 배포와 발신처 식별
 
@@ -189,7 +205,7 @@ service_name = "trader-kr-01"   # 생략 시 socket.gethostname()으로 대체
 [log.console]
 enabled = true
 level = "DEBUG"
-format = "text"        # "json" | "text"
+format = "text"        # "json" | "text" | "text.simple"
 stream = "stderr"      # "stdout" | "stderr"
 
 [log.file]
@@ -217,7 +233,7 @@ max_buffer = 10000      # 초과분은 오래된 것부터 버리고, 버려진 
 | `log.levels."<이름>"` | (없음) | 특정 로거 이름(예: `"asyncio"`, `"myapp.noisy"`)만 레벨을 개별 덮어씀. 기본은 빈 테이블 |
 | `log.console.enabled` | `true` | 콘솔 싱크 on/off |
 | `log.console.level` | `"DEBUG"` | 콘솔 싱크 레벨 |
-| `log.console.format` | `"text"` | `"text"`(사람용) 또는 `"json"` |
+| `log.console.format` | `"text"` | `"text"`(사람용), `"text.simple"`(시각·발신처를 뺀 사람용) 또는 `"json"` |
 | `log.console.stream` | `"stderr"` | `"stdout"` 또는 `"stderr"` |
 | `log.file.enabled` | `false` | 파일 싱크 on/off |
 | `log.file.level` | `"INFO"` | 파일 싱크 레벨 |

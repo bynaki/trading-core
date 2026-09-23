@@ -101,3 +101,19 @@ DEBUG(진단), `SendRouter`의 "Sender가 없다"는 WARNING. `on_task_exception
 정보를 함께 싣는다.
 재현·검증: `uv run examples/main.py serial` — ex09 로그 요약(`로거별`)에 `trading_core.helper`
 레코드가 잡힌다. 전용 단위 테스트는 없다(레벨·메시지 문구는 불변식이 아니라서).
+
+#### [done] examples:logger-output
+예제 출력을 `print`에서 로그 모듈로 옮기고 보기 쉽게 정리했다. 공용 설정은 `examples/setting.toml`
+(콘솔 text.simple·stdout·INFO)이고 `main.py`와 각 `run_ex.py`의 `main()`이 `configure()`한다.
+로거 이름은 예제·계층별로 직접 준다(`ex05.origin`·`ex05.require`·`ex05.dependent`, 소비자는
+`ex05`). 그래서 `parallel`에서도 줄마다 어느 예제의 어느 부분인지 보인다.
+`model_dump_json(indent=2)` 덤프는 한 줄 fields로 바꿨고, 판정의 `회귀:`는 ERROR로 남긴다. 예제마다
+`━━━━ 시작 ━━━━`/`━━━━ 끝 ━━━━` 배너를 두고, 끝 배너 메시지를 `"\n"`으로 끝내 예제 사이에 빈 줄을
+남긴다(로그로는 빈 줄을 따로 못 찍는다). ex09는 끝에 `shutdown()` 대신 공용 설정으로 재구성한다.
+`shutdown()` 뒤에는 자동 구성이 없어 이어서 도는 예제의 로그가 사라지기 때문이다.
+로그 모듈 쪽에는 콘솔 형식 `"text.simple"`(시각과 `[service@host:pid]`를 뺀
+`INFO  ex05.origin: ...`)을 더해 예제 공용 설정이 쓴다. ex09 전용 설정은 발신처를 보여야 하므로
+`"text"`로 둔다. 두 text 형식은 fields가 60자(`_INLINE_FIELDS_MAX`)를 넘으면 한 블록으로, dict
+값은 이름을 달아 indent=2 JSON으로 아래 줄에 펼친다.
+재현·검증: `uv run examples/main.py serial`·`parallel`. 형식 규칙은 tests/test_logger.py의
+`test_console_simple_text_format_drops_time_and_origin`, `test_text_fields_*` 세 개.

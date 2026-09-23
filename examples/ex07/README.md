@@ -54,16 +54,17 @@ uv run python examples/ex07/run_ex.py
 ```
 
 ```text
-symbol=BTC quote=USD price=101.0 swing=1.0
-symbol=ETH quote=USD price=201.0 swing=1.0
-symbol=XRP quote=USD price=301.0 swing=1.0
-symbol=BTC quote=USD price=102.0 swing=1.0
-symbol=ETH quote=USD price=202.0 swing=1.0
-symbol=XRP quote=USD price=302.0 swing=1.0
+ex07: ━━━━━━━━━━ 시작: RequestModel로 심볼마다 시퀀스 붙이기 ━━━━━━━━━━
+ex07: 수신 {symbol=BTC, quote=USD, price=101.0, swing=1.0}
+ex07: 수신 {symbol=ETH, quote=USD, price=201.0, swing=1.0}
+ex07: 수신 {symbol=XRP, quote=USD, price=301.0, swing=1.0}
+ex07: 수신 {symbol=BTC, quote=USD, price=102.0, swing=1.0}
+ex07: 수신 {symbol=ETH, quote=USD, price=202.0, swing=1.0}
+ex07: 수신 {symbol=XRP, quote=USD, price=302.0, swing=1.0}
+ex07: ━━━━━━━━━━ 끝 ━━━━━━━━━━
 ```
 
-(위는 `tr_annotation`을 뺀 요약이다. 실제로는 각 건이 `model_dump_json(indent=2)`으로
-출력된다.)
+(줄 앞의 레벨(`INFO  `)은 뺐다.) 심볼 순서는 실행마다 다르다.
 
 ## 관전 포인트
 

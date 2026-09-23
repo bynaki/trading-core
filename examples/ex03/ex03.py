@@ -6,6 +6,10 @@ from collections.abc import Set
 from typing import Literal
 
 from trading_core import DataModel, GenerateModel, initialize
+from trading_core.logger import get_logger
+
+log = get_logger("ex03.price")
+"""원천 binder의 로거. 이름을 직접 주어 실행 방식과 관계없이 `ex03.` 접두를 유지한다."""
 
 
 class PriceReq(GenerateModel):
@@ -58,18 +62,18 @@ async def _(ctx: PriceContext, symbols: Set[str]):
     """현재 구독 심볼 중 하나를 무작위로 골라 가격을 계속 발행한다."""
 
     ctx.updating_count += 1
-    print(f"!!!!!!!! {ctx.updating_count} Updating Stage")
+    log.info("generator 시작", run=ctx.updating_count, symbols=sorted(symbols))
     try:
         while True:
             symbol = random.choice(tuple(symbols))
             yield PriceData(symbol=symbol, price=ctx.price(symbol))
             await sleep(0.5)
     finally:
-        print("Update 별로 자원을 정리할 수 있다.")
+        log.info("업데이트 단위 정리 (generator finally)", run=ctx.updating_count)
 
 
 @price.detached
 async def _(ctx: PriceContext):
     """마지막 구독이 사라질 때 원천 스테이지 종료를 알린다."""
 
-    print("******* Detached Stage")
+    log.info("스테이지 단위 정리 (detached)")

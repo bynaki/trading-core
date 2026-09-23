@@ -5,14 +5,21 @@
 """
 
 import asyncio
+from pathlib import Path
 from unicodedata import east_asian_width
 
 from trading_core import DataModel, Domain, cast_model
+from trading_core.logger import configure, get_logger
 
 if __package__:
     from .ex06 import GEN_STARTS, QuoteData, QuoteRequest
 else:
     from ex06 import GEN_STARTS, QuoteData, QuoteRequest
+
+SETTINGS = Path(__file__).resolve().parents[1] / "setting.toml"
+"""예제 공용 로그 설정. 직접 실행할 때 `main()`이 읽는다."""
+
+log = get_logger("ex06")
 
 # 현재 시나리오 단계. `Recorder`가 수신 건수를 이 단계별로 나눠 센다.
 PHASE: list[str] = ["0단계"]
@@ -28,10 +35,10 @@ STARTS: dict[str, tuple[int, int]] = {}
 
 
 def set_phase(phase: str) -> None:
-    """단계를 바꾸고 구분선을 출력한다."""
+    """단계를 바꾸고 구분선을 남긴다."""
 
     PHASE[0] = phase
-    print(f"\n----- {phase} -----")
+    log.info(f"----- {phase} -----")
 
 
 def snapshot() -> tuple[int, int]:
@@ -57,7 +64,7 @@ class Recorder:
     async def __call__(self, data: DataModel) -> None:
         quote = cast_model(data, QuoteData)
         self.counts[PHASE[0]] = self.counts.get(PHASE[0], 0) + 1
-        print(f"  [수신 {self.tag}] {quote.symbol} = {quote.price:,.1f} (seq={quote.seq})")
+        log.info(f"수신 {self.tag}", symbol=quote.symbol, price=quote.price, seq=quote.seq)
 
 
 def _display_width(text: str) -> int:
@@ -66,46 +73,51 @@ def _display_width(text: str) -> int:
     return sum(2 if east_asian_width(ch) in "WF" else 1 for ch in text)
 
 
-def print_report(recorders: list[Recorder]) -> None:
-    """단계별 재시작 횟수·수신 건수 표와 판정을 출력한다."""
+def log_report(recorders: list[Recorder]) -> None:
+    """단계별 재시작 횟수·수신 건수 표와 판정을 남긴다.
 
-    print("\n===== 단계별 재시작 횟수와 수신 건수 =====")
+    표는 한 줄씩 같은 로거로 남긴다. 줄 앞머리의 길이가 같으므로 열이 맞는다.
+    판정은 정상이면 INFO, 회귀면 ERROR다.
+    """
+
+    log.info("===== 단계별 재시작 횟수와 수신 건수 =====")
     width = max(_display_width(phase) for phase in PHASES)
     headers = ("ORIGIN", "DEP", *(r.tag for r in recorders))
-    print(" " * width + "".join(f"  {h:>6}" for h in headers))
+    log.info(" " * width + "".join(f"  {h:>6}" for h in headers))
     for phase in PHASES:
         pad = " " * (width - _display_width(phase))
         origin, dependent = STARTS[phase]
         cells = (origin, dependent, *(r.counts[phase] for r in recorders))
-        print(phase + pad + "".join(f"  {c:>6}" for c in cells))
+        log.info(phase + pad + "".join(f"  {c:>6}" for c in cells))
 
     a, b = recorders
-    print("\n===== 판정 =====")
+    log.info("===== 판정 =====")
     if STARTS[PHASE_2] == (0, 0):
-        print("정상: 이미 합집합에 있는 심볼로 구독을 붙이면 두 계층 모두 재시작하지 않는다.")
+        log.info("정상: 이미 합집합에 있는 심볼로 구독을 붙이면 두 계층 모두 재시작하지 않는다.")
     else:
-        print(f"회귀: 합집합이 그대로인데 재시작했다. - {STARTS[PHASE_2]}")
+        log.error("회귀: 합집합이 그대로인데 재시작했다.", starts=STARTS[PHASE_2])
     if b.counts[PHASE_2] > 0:
-        print("정상: 재시작 없이도 새 구독자에게 데이터가 간다.")
+        log.info("정상: 재시작 없이도 새 구독자에게 데이터가 간다.")
     else:
-        print("회귀: 새 구독자가 데이터를 받지 못한다.")
+        log.error("회귀: 새 구독자가 데이터를 받지 못한다.")
     if a.counts[PHASE_2] > 0:
-        print("정상: 기존 구독자의 스트림이 끊기지 않는다.")
+        log.info("정상: 기존 구독자의 스트림이 끊기지 않는다.")
     else:
-        print("회귀: 기존 구독자의 스트림이 끊겼다.")
+        log.error("회귀: 기존 구독자의 스트림이 끊겼다.")
     if STARTS[PHASE_3] == (1, 1) and STARTS[PHASE_4] == (1, 1):
-        print("정상: 합집합이 넓어지거나 좁아지면 두 계층이 한 번씩 재시작한다.")
+        log.info("정상: 합집합이 넓어지거나 좁아지면 두 계층이 한 번씩 재시작한다.")
     else:
-        print(
-            "회귀: 합집합이 바뀌었는데 재시작 횟수가 다르다."
-            f" - 3단계 {STARTS[PHASE_3]}, 4단계 {STARTS[PHASE_4]}"
+        log.error(
+            "회귀: 합집합이 바뀌었는데 재시작 횟수가 다르다.",
+            phase3=STARTS[PHASE_3],
+            phase4=STARTS[PHASE_4],
         )
 
 
 async def run_ex(domain: Domain) -> None:
     """구독을 붙였다 떼며 합집합 변화와 재시작 횟수의 관계를 관찰한다."""
 
-    print("===== runing ex06 =====")
+    log.info("━━━━━━━━━━ 시작: 합집합이 바뀔 때만 재시작하기 ━━━━━━━━━━")
     req = QuoteRequest(market="spot")
     recorder_a = Recorder("A")
     recorder_b = Recorder("B")
@@ -140,13 +152,15 @@ async def run_ex(domain: Domain) -> None:
             await asyncio.sleep(2)
             record_starts(PHASE_4, before)
 
-    print_report([recorder_a, recorder_b])
-    print("\n===== finished ex06 =====")
+    log_report([recorder_a, recorder_b])
+    # 끝의 "\n"이 다음 예제와의 사이에 빈 줄을 남긴다.
+    log.info("━━━━━━━━━━ 끝 ━━━━━━━━━━\n")
 
 
 async def main() -> None:
     """독립 실행용 `Domain`을 시작하고 ex06을 실행한다."""
 
+    configure(SETTINGS)
     domain = Domain()
     await domain.start()
     try:

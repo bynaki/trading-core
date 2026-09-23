@@ -6,14 +6,21 @@
 """
 
 import asyncio
+from pathlib import Path
 from unicodedata import east_asian_width
 
 from trading_core import DataModel, Domain, cast_model
+from trading_core.logger import configure, get_logger
 
 if __package__:
     from .ex05 import PriceData, PriceRequest
 else:
     from ex05 import PriceData, PriceRequest
+
+SETTINGS = Path(__file__).resolve().parents[1] / "setting.toml"
+"""예제 공용 로그 설정. 직접 실행할 때 `main()`이 읽는다."""
+
+log = get_logger("ex05")
 
 # 현재 시나리오 단계. `Recorder`가 수신 건수를 이 단계별로 나눠 센다.
 PHASE: list[str] = ["0단계"]
@@ -25,10 +32,10 @@ PHASES = (PHASE_1, PHASE_2, PHASE_3)
 
 
 def set_phase(phase: str) -> None:
-    """단계를 바꾸고 구분선을 출력한다."""
+    """단계를 바꾸고 구분선을 남긴다."""
 
     PHASE[0] = phase
-    print(f"\n----- {phase} -----")
+    log.info(f"----- {phase} -----")
 
 
 class Recorder:
@@ -45,7 +52,7 @@ class Recorder:
     async def __call__(self, data: DataModel) -> None:
         price = cast_model(data, PriceData)
         self.counts[PHASE[0]] = self.counts.get(PHASE[0], 0) + 1
-        print(f"  [수신 {self.tag}] {price.symbol} = {price.price:,.1f} (seq={price.seq})")
+        log.info(f"수신 {self.tag}", symbol=price.symbol, price=price.price, seq=price.seq)
 
 
 def _display_width(text: str) -> int:
@@ -54,32 +61,36 @@ def _display_width(text: str) -> int:
     return sum(2 if east_asian_width(ch) in "WF" else 1 for ch in text)
 
 
-def print_report(recorders: list[Recorder]) -> None:
-    """단계별 수신 건수 표와 판정을 출력한다."""
+def log_report(recorders: list[Recorder]) -> None:
+    """단계별 수신 건수 표와 판정을 남긴다.
 
-    print("\n===== 단계별 수신 건수 =====")
+    표는 한 줄씩 같은 로거로 남긴다. 줄 앞머리의 길이가 같으므로 열이 맞는다.
+    판정은 정상이면 INFO, 회귀면 ERROR다.
+    """
+
+    log.info("===== 단계별 수신 건수 =====")
     width = max(_display_width(phase) for phase in PHASES)
-    print(" " * width + "".join(f"  {r.tag:>6}" for r in recorders))
+    log.info(" " * width + "".join(f"  {r.tag:>6}" for r in recorders))
     for phase in PHASES:
         pad = " " * (width - _display_width(phase))
-        print(phase + pad + "".join(f"  {r.counts[phase]:>6}" for r in recorders))
+        log.info(phase + pad + "".join(f"  {r.counts[phase]:>6}" for r in recorders))
 
     a, _ = recorders
-    print("\n===== 판정 =====")
+    log.info("===== 판정 =====")
     if a.counts[PHASE_2] == 0:
-        print("회귀: B가 붙는 순간 A가 데이터를 전혀 받지 못한다.")
+        log.error("회귀: B가 붙는 순간 A가 데이터를 전혀 받지 못한다.")
     else:
-        print("정상: A는 B가 붙은 뒤에도 계속 데이터를 받는다.")
+        log.info("정상: A는 B가 붙은 뒤에도 계속 데이터를 받는다.")
     if a.counts[PHASE_3] == 0:
-        print("회귀: B가 떠난 뒤에도 A의 상위 구독이 돌아오지 않는다.")
+        log.error("회귀: B가 떠난 뒤에도 A의 상위 구독이 돌아오지 않는다.")
     else:
-        print("정상: B가 떠난 뒤 A의 상위 구독이 남아 있다.")
+        log.info("정상: B가 떠난 뒤 A의 상위 구독이 남아 있다.")
 
 
 async def run_ex(domain: Domain) -> None:
     """A·B 두 구독자를 시간차로 붙였다 떼며 상위 구독이 어떻게 바뀌는지 관찰한다."""
 
-    print("===== runing ex05 =====")
+    log.info("━━━━━━━━━━ 시작: 같은 파생 요청을 서로 다른 심볼로 동시에 구독하기 ━━━━━━━━━━")
     req = PriceRequest(quote="usd")
     recorder_a = Recorder("A")
     recorder_b = Recorder("B")
@@ -98,13 +109,15 @@ async def run_ex(domain: Domain) -> None:
         set_phase(PHASE_3)
         await asyncio.sleep(2)
 
-    print_report([recorder_a, recorder_b])
-    print("\n===== finished ex05 =====")
+    log_report([recorder_a, recorder_b])
+    # 끝의 "\n"이 다음 예제와의 사이에 빈 줄을 남긴다.
+    log.info("━━━━━━━━━━ 끝 ━━━━━━━━━━\n")
 
 
 async def main() -> None:
     """독립 실행용 `Domain`을 시작하고 ex05를 실행한다."""
 
+    configure(SETTINGS)
     domain = Domain()
     await domain.start()
     try:

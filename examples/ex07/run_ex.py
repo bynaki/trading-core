@@ -6,13 +6,20 @@
 """
 
 import asyncio
+from pathlib import Path
 
 from trading_core import Domain, cast_model
+from trading_core.logger import configure, get_logger
 
 if __package__:
     from .ex07 import SwingData, SwingReq
 else:
     from ex07 import SwingData, SwingReq
+
+SETTINGS = Path(__file__).resolve().parents[1] / "setting.toml"
+"""예제 공용 로그 설정. 직접 실행할 때 `main()`이 읽는다."""
+
+log = get_logger("ex07")
 
 
 async def run_ex(domain: Domain) -> None:
@@ -22,22 +29,24 @@ async def run_ex(domain: Domain) -> None:
     데이터의 `symbol`이 다시 `"BTC"`인 것이 이 예제의 관전 포인트다.
     """
 
-    print("===== runing ex07 =====")
+    log.info("━━━━━━━━━━ 시작: RequestModel로 심볼마다 시퀀스 붙이기 ━━━━━━━━━━")
     req07 = SwingReq(quote="USD")
     received = 0
     async with domain.request(req07, {"BTC", "ETH", "XRP"}) as gen:
         async for data in gen:
             d = cast_model(data, SwingData)
-            print(d.model_dump_json(indent=2))
+            log.info("수신", symbol=d.symbol, quote=d.quote, price=d.price, swing=d.swing)
             received += 1
             if received == 6:
                 break
-    print("===== finished ex07 =====")
+    # 끝의 "\n"이 다음 예제와의 사이에 빈 줄을 남긴다.
+    log.info("━━━━━━━━━━ 끝 ━━━━━━━━━━\n")
 
 
 async def main() -> None:
     """독립 실행용 `Domain`을 시작하고 ex07을 실행한다."""
 
+    configure(SETTINGS)
     domain = Domain()
     await domain.start()
     await run_ex(domain)

@@ -9,7 +9,7 @@ ex05가 "상위에 **무엇을** 등록하는가"(합집합)를 다뤘다면, �
 `SendRouter`에 등록되어 곧바로 데이터를 받지만, 상위 원천도 파생 generator도
 그대로 돌아간다. 반대로 합집합이 넓어지거나 좁아지면 두 계층이 함께 재시작한다.
 
-각 generator는 자신이 몇 회차로 (재)시작했는지 출력하고 `GEN_STARTS`에 기록한다.
+각 generator는 자신이 몇 회차로 (재)시작했는지 로그로 남기고 `GEN_STARTS`에 기록한다.
 `run_ex.py`가 단계별 증가분을 세어 재시작 여부를 판정한다.
 """
 
@@ -17,7 +17,13 @@ from asyncio import sleep
 from typing import Literal
 
 from trading_core import DataModel, DependentModel, GenerateModel, initialize
+from trading_core.logger import get_logger
 from trading_core.model import Receiver, cast_model
+
+# 콜백마다 로거를 따로 둔다. 줄마다 붙는 이름(`ex06.origin` 등)이 어느 계층의 로그인지 알려 준다.
+origin_log = get_logger("ex06.origin")
+require_log = get_logger("ex06.require")
+dependent_log = get_logger("ex06.dependent")
 
 QUOTE_SUFFIX = "/USD"
 
@@ -68,7 +74,7 @@ async def _(ctx: FeedRequest, symbols: set[str]):
 
     GEN_STARTS["origin"] += 1
     count = GEN_STARTS["origin"]
-    print(f"[ORIGIN]    generator {count}회차 시작 — 상위 구독 심볼 = {sorted(symbols)}")
+    origin_log.info(f"generator {count}회차 시작", upper=sorted(symbols))
     seq = 0
     while True:
         for symbol in sorted(symbols):
@@ -95,12 +101,12 @@ def quote_requirement(req: QuoteRequest, symbols: set[str]):
     """하위 심볼(`BTC`)을 상위 거래소 표기(`BTC/USD`)로 바꾼다.
 
     **이 콜백이 불렸다는 것 자체가 파생 스테이지가 재시작 경로에 들어섰다는 신호다.**
-    합집합이 그대로여서 조기 반환하면 `Domain`은 여기까지 오지 않으므로 `[REQUIRE]`
+    합집합이 그대로여서 조기 반환하면 `Domain`은 여기까지 오지 않으므로 `ex06.require`
     줄이 아예 찍히지 않는다.
     """
 
     upstream = {f"{s}{QUOTE_SUFFIX}" for s in symbols}
-    print(f"[REQUIRE]   하위 {sorted(symbols)} -> 상위 {sorted(upstream)}")
+    require_log.info("심볼 변환", lower=sorted(symbols), upper=sorted(upstream))
     return FeedRequest(venue="mockex"), upstream
 
 
@@ -121,12 +127,14 @@ async def _(ctx: QuoteRequest, symbols: set[str], recv: Receiver):
 
     GEN_STARTS["dependent"] += 1
     count = GEN_STARTS["dependent"]
-    print(f"[DEPENDENT] generator {count}회차 시작 — 하위 구독 심볼 = {sorted(symbols)}")
+    dependent_log.info(f"generator {count}회차 시작", lower=sorted(symbols))
     while True:
         data = await recv()
         feed_data = cast_model(data, FeedData)
         symbol = base_of(feed_data.symbol)
         if symbol not in symbols:
-            print(f"warning: 구독하지 않은 심볼이 올라왔다. - {symbol}, {sorted(symbols)}")
+            dependent_log.warning(
+                "구독하지 않은 심볼이 올라왔다", symbol=symbol, symbols=sorted(symbols)
+            )
             continue
         yield QuoteData(symbol=symbol, price=feed_data.price, seq=feed_data.seq)

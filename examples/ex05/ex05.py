@@ -6,8 +6,8 @@ ex04와 같은 구조(기초 자산 → 거래소 표기로 심볼을 변환하�
 구독한다.
 
 보여 주는 불변식은 하나다. **파생 스테이지가 상위 원천에 등록하는 심볼은 구독자
-전체의 합집합이어야 한다.** 각 콜백은 자신이 어떤 심볼로 (재)시작했는지 출력하므로,
-`[DEPENDENT]` 줄과 `[ORIGIN]` 줄의 심볼을 비교하면 두 계층의 구독 상태가 맞물려
+전체의 합집합이어야 한다.** 각 콜백은 자신이 어떤 심볼로 (재)시작했는지 로그로 남기므로,
+`ex05.dependent` 줄과 `ex05.origin` 줄의 심볼을 비교하면 두 계층의 구독 상태가 맞물려
 있는지 눈으로 확인할 수 있다. 이 불변식이 깨져 있던 시절에는 먼저 구독한 쪽이 아무
 오류 없이 데이터만 끊겼다 — 자세한 내력은 `README.md`에 있다.
 """
@@ -16,7 +16,13 @@ from asyncio import sleep
 from typing import Literal
 
 from trading_core import DataModel, DependentModel, GenerateModel, initialize
+from trading_core.logger import get_logger
 from trading_core.model import Receiver, cast_model
+
+# 콜백마다 로거를 따로 둔다. 줄마다 붙는 이름(`ex05.origin` 등)이 어느 계층의 로그인지 알려 준다.
+origin_log = get_logger("ex05.origin")
+require_log = get_logger("ex05.require")
+dependent_log = get_logger("ex05.dependent")
 
 QUOTE_SUFFIX = "/USD"
 
@@ -61,11 +67,11 @@ async def _(ctx: TickRequest, symbols: set[str]):
     """구독 심볼 전체를 한 바퀴 돌며 0.5초 간격으로 체결가를 발행한다.
 
     **이 콜백이 받은 `symbols`가 곧 상위 원천의 실제 구독 상태다.** 파생 스테이지가
-    갱신될 때마다 generator가 재시작되므로, 로그의 `[ORIGIN]` 줄을 보면 상위에 어떤
+    갱신될 때마다 generator가 재시작되므로, 로그의 `ex05.origin` 줄을 보면 상위에 어떤
     심볼이 등록되었는지 그대로 확인할 수 있다.
     """
 
-    print(f"[ORIGIN]    generator (재)시작 — 상위 구독 심볼 = {sorted(symbols)}")
+    origin_log.info("generator (재)시작", upper=sorted(symbols))
     seq = 0
     while True:
         for symbol in sorted(symbols):
@@ -96,7 +102,7 @@ def price_requirement(req: PriceRequest, symbols: set[str]):
     """
 
     upstream = {f"{s}{QUOTE_SUFFIX}" for s in symbols}
-    print(f"[REQUIRE]   하위 {sorted(symbols)} -> 상위 {sorted(upstream)}")
+    require_log.info("심볼 변환", lower=sorted(symbols), upper=sorted(upstream))
     return TickRequest(venue="mockex"), upstream
 
 
@@ -111,16 +117,18 @@ def price(req: PriceRequest) -> PriceRequest:
 async def _(ctx: PriceRequest, symbols: set[str], recv: Receiver):
     """상위 체결가를 받아 심볼을 기초 자산으로 되돌려 발행한다.
 
-    `symbols`는 파생 스테이지 구독자들의 **합집합**이다. `[DEPENDENT]` 줄과
-    `[ORIGIN]` 줄의 심볼을 비교해 보면 두 계층의 구독 상태가 맞물려 있는 것이 보인다.
+    `symbols`는 파생 스테이지 구독자들의 **합집합**이다. `ex05.dependent` 줄과
+    `ex05.origin` 줄의 심볼을 비교해 보면 두 계층의 구독 상태가 맞물려 있는 것이 보인다.
     """
 
-    print(f"[DEPENDENT] generator (재)시작 — 하위 구독 심볼 = {sorted(symbols)}")
+    dependent_log.info("generator (재)시작", lower=sorted(symbols))
     while True:
         data = await recv()
         tick_data = cast_model(data, TickData)
         symbol = base_of(tick_data.symbol)
         if symbol not in symbols:
-            print(f"warning: 구독하지 않은 심볼이 올라왔다. - {symbol}, {sorted(symbols)}")
+            dependent_log.warning(
+                "구독하지 않은 심볼이 올라왔다", symbol=symbol, symbols=sorted(symbols)
+            )
             continue
         yield PriceData(symbol=symbol, price=tick_data.price, seq=tick_data.seq)

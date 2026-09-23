@@ -1,35 +1,45 @@
 """두 `Stage`가 공유하는 원천 심볼 합집합을 관찰하는 실행 모듈."""
 
 from asyncio import gather, run, sleep
+from pathlib import Path
 
 from trading_core import Domain
+from trading_core.logger import configure, get_logger
 
 if __package__:
     from .ex03 import PriceData, PriceReq
 else:
     from ex03 import PriceData, PriceReq
 
+SETTINGS = Path(__file__).resolve().parents[1] / "setting.toml"
+"""예제 공용 로그 설정. 직접 실행할 때 `main()`이 읽는다."""
+
+log = get_logger("ex03")
+
 
 class TestSender:
-    """`Sender` 프로토콜에 맞춰 받은 가격 데이터를 출력한다."""
+    """`Sender` 프로토콜에 맞춰 받은 가격 데이터를 로그로 남긴다."""
+
+    def __init__(self, tag: str) -> None:
+        self.tag = tag
 
     async def __call__(self, data: PriceData) -> None:
-        """스테이지가 라우팅한 가격 데이터를 JSON으로 출력한다."""
+        """스테이지가 라우팅한 가격 데이터를 어느 스테이지가 받았는지와 함께 남긴다."""
 
-        print(data.model_dump_json(indent=2))
+        log.info(f"수신 {self.tag}", symbol=data.symbol, price=data.price)
 
 
 async def run_ex(domain: Domain) -> None:
     """두 스테이지에서 심볼을 갱신하며 원천의 합집합을 검증한다."""
 
-    print("===== runing ex03 =====")
+    log.info("━━━━━━━━━━ 시작: Domain.stage()로 구독 심볼 직접 갱신하기 ━━━━━━━━━━")
     req = PriceReq(ohlc="close")
     content_id = req.get_tr_content_id()
 
     async def _(symbol_name: str, length: int) -> None:
         """개별 스테이지의 심볼을 추가·제거하며 원천 포함 관계를 확인한다."""
 
-        sender = TestSender()
+        sender = TestSender(symbol_name)
         async with domain.stage(req, sender) as stage:
             i = 0
             symbols: set[str] = set()
@@ -37,26 +47,34 @@ async def run_ex(domain: Domain) -> None:
                 symbols.add(f"{symbol_name}-{i + 1}")
                 await stage.update(symbols)
                 origin = domain.get_origin_stage(content_id)
-                print(f"symbols: {symbols}")
-                print(f"orgin.symbols: {origin.output.symbols}")
+                log.info(
+                    f"심볼 추가 {symbol_name}",
+                    symbols=sorted(symbols),
+                    origin=sorted(origin.output.symbols),
+                )
                 assert (symbols & origin.output.symbols) == symbols
                 await sleep(0.5)
             for j in range(i, 0, -1):
                 symbols.remove(f"{symbol_name}-{j + 1}")
                 await stage.update(symbols)
                 origin = domain.get_origin_stage(content_id)
-                print(f"symbols: {symbols}")
-                print(f"orgin.symbols: {origin.output.symbols}")
+                log.info(
+                    f"심볼 제거 {symbol_name}",
+                    symbols=sorted(symbols),
+                    origin=sorted(origin.output.symbols),
+                )
                 assert (symbols & origin.output.symbols) == symbols
                 await sleep(0.5)
 
     await gather(_("symbols01", 3), _("symbols02", 5))
-    print("===== finished ex03 =====")
+    # 끝의 "\n"이 다음 예제와의 사이에 빈 줄을 남긴다.
+    log.info("━━━━━━━━━━ 끝 ━━━━━━━━━━\n")
 
 
 async def main() -> None:
     """독립 실행용 `Domain`을 시작하고 ex03을 실행한다."""
 
+    configure(SETTINGS)
     domain = Domain()
     await domain.start()
     await run_ex(domain)

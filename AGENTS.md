@@ -66,9 +66,13 @@ uv run examples/main.py parallel      # 모든 예제를 공유 Domain에서 동
 - 운영·설계 문서는 `docs/`에 있다: `TODO.md`, `DONE.md`, `design.log.md`(로그 모듈 설계), 있을 때만
   `HANDOFF.md`.
 - 예제는 ex01~ex09. ex06은 파생 스테이지의 "합집합이 그대로면 재시작 안 함", ex07·ex08은
-  instanter(ex08은 요청형 스테이지가 content_id로 공유되지 **않음**), ex09는 로그 모듈이다. ex09만
-  프로세스 전역 루트 로거를 `configure()`하고 나머지는 `print`라 `serial`·`parallel`에서 서로
-  영향이 없다.
+  instanter(ex08은 요청형 스테이지가 content_id로 공유되지 **않음**), ex09는 로그 모듈이다.
+- 예제 출력은 모두 `trading_core.logger`로 남긴다(`print` 없음). 공용 설정은
+  `examples/setting.toml`이고 `main.py`와 각 `run_ex.py`의 `main()`이 `configure()`한다. 로거
+  이름은 `__name__`이 아니라 `"ex05.origin"`처럼 직접 준다 — 직접 실행하면 `__main__`이 되어 어느
+  예제인지 안 보인다. `get_logger(__name__)` 관용구를 보이는 ex09만 예외다.
+- ex09만 자기 `setting.toml`로 재구성했다가 끝에 공용 설정으로 **다시 `configure()`해** 되돌린다.
+  `shutdown()`하면 그 뒤로 도는 예제의 로그가 어디로도 안 나간다.
 - `playground.py`는 타입 실험용 스크래치 파일이다. 정식 예제가 아니다.
 
 ## 아키텍처

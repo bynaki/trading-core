@@ -10,11 +10,15 @@ from trading_core import (
     cast_model,
     initialize,
 )
+from trading_core.logger import get_logger
 
 if __package__:
     from . import origin
 else:
     import origin
+
+log = get_logger("ex02.refer")
+"""파생 binder의 로거."""
 
 
 class NamingReq(DependentModel):
@@ -73,12 +77,12 @@ async def _(ctx: NamingContext, symbols: set[str], recv: Receiver):
     """원천 데이터를 수신하여 요청한 종류의 이름만 발행한다."""
 
     ctx.count += 1
-    print(f"!!!!!!! {ctx.count} Updating Naming Stage - req: {ctx.req_model.kind}")
+    log.info("generator 시작", kind=ctx.req_model.kind, run=ctx.count, symbols=sorted(symbols))
     try:
         while data := await recv():
             d = cast_model(data, origin.NamingAllData)
             if d.symbol not in symbols:
-                print(f"warning: 요청한 심볼과 받은 심볼이 일치하지 않는다. - {d.symbol}")
+                log.warning("요청한 심볼과 받은 심볼이 일치하지 않는다", symbol=d.symbol)
             req = ctx.req_model
             if req.kind == "flower":
                 yield NamingData(symbol=d.symbol, name=f"{d.flower} - flower")
@@ -89,12 +93,12 @@ async def _(ctx: NamingContext, symbols: set[str], recv: Receiver):
             else:
                 raise Exception("있을수 없는일!!")
     except ClosedConnection as e:
-        print(f"Closed Receiver at NamingReq Binder - {e}")
+        log.info("Receiver 닫힘", kind=ctx.req_model.kind, reason=str(e))
 
 
 @naming.detached
 async def _(ctx: NamingContext):
     """마지막 파생 구독이 사라지면 공유 컨텍스트를 분리한다."""
 
-    print(f"******* Detached Naming Stage - req: {ctx.req_model.kind}")
+    log.info("스테이지 분리 (detached)", kind=ctx.req_model.kind)
     ctx.detach()

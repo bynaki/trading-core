@@ -61,6 +61,11 @@ uv run examples/main.py parallel  # 전체를 공유 Domain에서 동시 실행
 uv run examples/main.py --help    # 예제 목록
 ```
 
+예제 출력은 모두 로그로 나갑니다. 줄마다 붙는 로거 이름(`ex01`, `ex05.origin` 등)이 어느
+예제의 어느 부분이 남긴 줄인지 알려 주므로, `parallel`처럼 여러 예제가 섞여도 가려 볼 수
+있습니다. 예제 공용 로그 설정은 `examples/setting.toml`이며, 콘솔은 시각과 발신처를 뺀 짧은
+형식으로 찍힙니다.
+
 각 예제 디렉터리에는 무엇을 왜 보여 주는지 설명한 README가 있습니다. 처음이라면
 `examples/ex01`부터 보세요. 예제는 단순 API 데모가 아니라 공유·라우팅·정리 동작을
 관찰하도록 짜인 시나리오입니다.

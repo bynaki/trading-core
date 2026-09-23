@@ -279,6 +279,76 @@ def test_console_text_format(tmp_path: Path, capsys: pytest.CaptureFixture[str])
     assert " INFO  " in err
 
 
+def test_console_simple_text_format_drops_time_and_origin(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+):
+    body = '[log]\nservice_name = "svc"\n\n[log.console]\nformat = "text.simple"\n'
+    configure(write_settings(tmp_path / "setting.toml", body))
+
+    log = get_logger("myapp.console")
+    log.info("안녕", a=1, b="x")
+    try:
+        raise ValueError("boom")
+    except ValueError:
+        log.exception("실패")
+    shutdown()
+
+    lines = capsys.readouterr().err.splitlines()
+    assert lines[0] == "INFO  myapp.console: 안녕 {a=1, b=x}"
+    assert lines[1] == "ERROR myapp.console: 실패"
+    assert lines[-1] == "ValueError: boom"  # 트레이스백은 text와 같이 붙는다
+    assert not any("svc@" in line for line in lines)
+
+
+def test_text_fields_stay_inline_while_short_and_flat(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+):
+    configure(write_settings(tmp_path / "setting.toml", '[log.console]\nformat = "text.simple"\n'))
+
+    get_logger("t").info("짧음", a=1, xs=[1, 2], meta={})  # 빈 dict는 펼치지 않는다
+    shutdown()
+
+    assert capsys.readouterr().err.splitlines() == ["INFO  t: 짧음 {a=1, xs=[1, 2], meta={}}"]
+
+
+def test_text_fields_expand_dicts_under_their_name(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+):
+    configure(write_settings(tmp_path / "setting.toml", '[log.console]\nformat = "text.simple"\n'))
+
+    class Order(BaseModel):
+        symbol: str
+        qty: float
+
+    get_logger("t").info("주문", id=7, order=Order(symbol="BTC", qty=1.5))
+    shutdown()
+
+    assert capsys.readouterr().err.splitlines() == [
+        "INFO  t: 주문 {id=7}",
+        "  order = {",
+        '    "symbol": "BTC",',
+        '    "qty": 1.5',
+        "  }",
+    ]
+
+
+def test_text_fields_bundle_into_one_block_when_too_long(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+):
+    configure(write_settings(tmp_path / "setting.toml", '[log.console]\nformat = "text"\n'))
+
+    symbols = [f"SYMBOL_{c}" for c in "ABCDEFGHIJ"]
+    get_logger("t").info("긺", run=3, symbols=symbols, order={"qty": 1})
+    shutdown()
+
+    head, *rest = capsys.readouterr().err.splitlines()
+    assert head.endswith("] t: 긺")  # text 형식도 같은 규칙이다
+    split = rest.index("  order = {")
+    bundled = "\n".join(line.removeprefix("  ") for line in rest[:split])
+    assert json.loads(bundled) == {"run": 3, "symbols": symbols}
+    assert rest[split:] == ["  order = {", '    "qty": 1', "  }"]
+
+
 def test_console_json_format_to_stdout(tmp_path: Path, capsys: pytest.CaptureFixture[str]):
     body = '[log.console]\nformat = "json"\nstream = "stdout"\n'
     configure(write_settings(tmp_path / "setting.toml", body))

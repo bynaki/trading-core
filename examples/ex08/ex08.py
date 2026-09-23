@@ -24,7 +24,12 @@ from typing import Literal
 from pydantic import BaseModel
 
 from trading_core import DataModel, GenerateModel, Runnable, initialize
+from trading_core.logger import get_logger
 from trading_core.model import RequestModel
+
+# 계층마다 로거를 따로 둔다. 줄마다 붙는 이름이 원천(`beat`)과 요청형(`watch`)을 가른다.
+beat_log = get_logger("ex08.beat")
+watch_log = get_logger("ex08.watch")
 
 INIT_PRICE_DICT: dict[str, float] = {
     "BTC/USD": 100,
@@ -62,7 +67,7 @@ def beat(req: BeatReq) -> BeatCtx:
 
     global _beat_ctx_count
     _beat_ctx_count += 1
-    print(f"[ex08] BeatCtx 생성 #{_beat_ctx_count}")
+    beat_log.info(f"BeatCtx 생성 #{_beat_ctx_count}")
     return BeatCtx(no=_beat_ctx_count, current_price_dict=INIT_PRICE_DICT.copy())
 
 
@@ -116,7 +121,7 @@ def watch(req: WatchReq) -> WatchCtx:
 
     global _watch_ctx_count
     _watch_ctx_count += 1
-    print(f"[ex08] WatchCtx 생성 #{_watch_ctx_count} - content_id={req.get_tr_content_id()}")
+    watch_log.info(f"WatchCtx 생성 #{_watch_ctx_count}", content_id=req.get_tr_content_id())
     return WatchCtx(no=_watch_ctx_count, quote=req.quote)
 
 
@@ -151,7 +156,7 @@ async def _(ctx: WatchCtx, symbol: str):
     불린다. 스테이지가 공유된다면 한 번이었을 것이다.
     """
 
-    print(f"[ex08] bind   ctx#{ctx.no} symbol={symbol}")
+    watch_log.info(f"bind   ctx#{ctx.no}", symbol=symbol)
     yield BeatReq()(f"{symbol}/{ctx.quote}") | WatchRunnable(ctx, symbol)
 
 
@@ -159,11 +164,11 @@ async def _(ctx: WatchCtx, symbol: str):
 async def _(ctx: WatchCtx, symbol: str):
     """슬롯이 닫힐 때 불린다. 슬롯이 스테이지마다 따로 있으므로 이것도 두 번 불린다."""
 
-    print(f"[ex08] unbind ctx#{ctx.no} symbol={symbol}")
+    watch_log.info(f"unbind ctx#{ctx.no}", symbol=symbol)
 
 
 @watch.detached
 async def _(ctx: WatchCtx):
     """스테이지 전체가 닫힐 때 불린다. 마지막 `seen` 값을 남긴다."""
 
-    print(f"[ex08] detach ctx#{ctx.no} seen={ctx.seen}")
+    watch_log.info(f"detach ctx#{ctx.no}", seen=ctx.seen)
