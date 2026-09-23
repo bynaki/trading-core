@@ -17,7 +17,7 @@ WebSocket 클라이언트가 아니라, 실시간 스트림을 다룰 때 반복
   작업은 `TODO.md`에 적는다.
 - **`docs/HANDOFF.md`는 있을 때만 읽는다.** 직전 세션이 멈춘 곳을 넘기는 일회성 문서라 평소엔 없다.
   이어받아 끝내면 지운다.
-- `TODO.md` 항목은 `#### [done] <prefix>:<word>` 제목 아래 내용을 적는다. `<prefix>:<word>`
+- `TODO.md` 항목은 `### [done] <prefix>:<word>` 제목 아래 내용을 적는다. `<prefix>:<word>`
   (예: `logger:server-transport`)가 항목 구분자이자 태그이고, 같은 `prefix`는 같은 주제다.
 - 할 일을 마치면 그 자리에서 제목에 `[done]`만 붙인다. `docs/DONE.md`로 옮기는 것은 커밋 때다
   (아래 "코드 규약"의 커밋 절차).

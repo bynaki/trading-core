@@ -4,7 +4,7 @@
 > 이 파일을 매번 읽지 않는다 — 과거 결함·설계 결정의 내력이 필요할 때만 찾아본다. 형식은
 > `docs/TODO.md`와 같다(`AGENTS.md` "새 세션을 시작할 때" 참고).
 
-#### [done] domain:dependent-union-share
+### [done] domain:dependent-union-share
 같은 파생 요청을 서로 다른 심볼 집합으로 동시에 구독하면 먼저 구독한 쪽이 데이터를 전혀 받지
 못하던 문제. 파생 스테이지 자신의 심볼은 SharedSender가 합집합으로 관리하는데, 상위 원천에
 등록하는 심볼은 그 시점 update의 req_symbols뿐이라 같은 transq의 이전 등록을 덮어쓰고 있었다.
@@ -15,7 +15,7 @@ require 변환을 set_sender() 뒤로 옮겨 합집합(current_symbols)을 입�
 스테이지가 transq 하나로 상위 하나만 바라보기 때문이며, 필요해지면 상위 스테이지를 여러 개 드는
 구조가 따로 있어야 한다.
 
-#### [done] domain:instanter-bootstrap
+### [done] domain:instanter-bootstrap
 instanter(RequestModel) 경로가 한 번도 실행된 적이 없어 `Domain._define_inst_stage()`에 결함 셋이
 남아 있던 문제. ex07이 이 경로를 쓰는 첫 예제라 거기서 드러났다.
 (1) `new_symbols`를 센티널이 섞인 `current_symbols`에서 계산해 `"__require__"`가 실제 심볼처럼
@@ -30,7 +30,7 @@ content_id 키의 dict로 바꿨다. `BaseReqModel`은 `__setattr__`로 content_
 재현·검증: examples/ex07, tests/test_domain.py의 `instanter 스트림` 절(테스트 셋 모두 표기가
 다른 매핑을 써야 (3)이 잡힌다).
 
-#### [done] model:dead-attribute
+### [done] model:dead-attribute
 `Sequence._set_req_symbol()`이 쓰는 `_req_symbol`은 binder.py에서 쓰기만 하고 어디서도 읽지 않는
 죽은 속성이었다. 지웠다.
 그 값(하위 슬롯 키)은 `_define_inst_stage.update()`가 이미 `seq_sender_dict`/`transq_dict`의
@@ -43,7 +43,7 @@ content_id 키의 dict로 바꿨다. `BaseReqModel`은 `__setattr__`로 content_
 (`self._bind_cb = cb`). 제너레이터 래핑이 한 겹 줄었다. `get_generate_cb()`/`get_dependent_cb()`의
 wrap은 `_tr_req_content_id`를 심으므로 남는다.
 
-#### [done] domain:instanter-orphan-upstream
+### [done] domain:instanter-orphan-upstream
 어떤 시퀀스도 쓰지 않게 된 상위 스테이지가 instanter의 `active_stage_set`에 계속 남던 문제.
 `SendRouterSet.clear()`가 센더가 다 빠진 `Registered`를 남겨 그 상위가 `detaching_stage_set`에
 걸리지 않았다. 처음엔 "원천 구독이 정상 해제되니 실동작은 무해"로 봤지만 틀렸다. 남은 상위는
@@ -55,7 +55,7 @@ wrap은 `_tr_req_content_id`를 심으므로 남는다.
 `SendRouter`와 새 스테이지가 짝지어지므로 동일성 검사와 충돌하지 않는다.
 재현·검증: tests/test_domain.py의 `test_instant_detaches_an_upstream_no_sequence_uses`(`SplitReq`).
 
-#### [done] domain:instanter-detach-unbind
+### [done] domain:instanter-detach-unbind
 instanter 스테이지의 `detach()`가 남아 있는 심볼에 대해 `unbind_cb`를 부르지 않아, 심볼을 들고
 종료하는 보통의 경우에 심볼별 자원이 새던 문제.
 심볼 단위 정리를 `unbind_symbols()` 지역 헬퍼로 뽑아 `update()`의 삭제 경로와 `detach()`가 함께
@@ -67,7 +67,7 @@ instanter 스테이지의 `detach()`가 남아 있는 심볼에 대해 `unbind_c
 `test_instant_unbinds_each_symbol_exactly_once`(짝 계약), `test_instant_require_slot_is_not_unbound`
 (센티널 제외).
 
-#### [done] domain:instanter-resubscribe
+### [done] domain:instanter-resubscribe
 instanter에서 심볼을 뺐다가 곧바로 다시 넣으면 `f"{id}:{symbol}"` 태스크 이름 충돌로
 `TaskManagerError`가 나던 문제.
 슬롯을 닫을 때 `transq.shutdown()`만 하고 `_task_sequence` 종료를 기다리지 않았다. 소비자(`output`)가
@@ -79,7 +79,7 @@ instanter에서 심볼을 뺐다가 곧바로 다시 넣으면 `f"{id}:{symbol}"
 재현·검증: tests/test_domain.py의 `test_instant_symbol_can_be_resubscribed_right_away`(느린
 소비자를 흉내 내는 `BlockingRecorder` 사용).
 
-#### [done] domain:instanter-closed-slot-race
+### [done] domain:instanter-closed-slot-race
 instanter 슬롯이 닫힐 때 공유된 상위 generator가 죽을 수 있던 경합.
 `update()`는 빠지는 슬롯의 큐를 먼저 닫고 상위 구독은 나중에 갱신한다. 그 사이 상위가 보낸
 데이터가 `SequenceSender`에서 `ClosedConnection`으로 터지면 `SendRouter`의 `TaskGroup`을 거쳐
@@ -92,7 +92,7 @@ instanter 슬롯이 닫힐 때 공유된 상위 generator가 죽을 수 있던 �
 재현·검증: tests/test_transport.py의 `test_sequence_sender_drops_data_for_a_closed_slot`(경합이라
 통합 테스트 대신 단위로 고정).
 
-#### [done] logger:print-migration
+### [done] logger:print-migration
 기존 `print`를 로그 모듈로 옮겼다. `helper.py`의 `TaskManager`(`[TASK SUBMIT]` 등 진단, 여러 곳)와
 `domain.py`의 `SendRouter.__call__`에 있던 경고 한 줄("Sender가 없다")이 대상이었다.
 `helper.py`·`domain.py`는 각각 모듈 상단에서 `get_logger(__name__)`으로 로거를 얻는다(순환 임포트
@@ -102,7 +102,7 @@ DEBUG(진단), `SendRouter`의 "Sender가 없다"는 WARNING. `on_task_exception
 재현·검증: `uv run examples/main.py serial` — ex09 로그 요약(`로거별`)에 `trading_core.helper`
 레코드가 잡힌다. 전용 단위 테스트는 없다(레벨·메시지 문구는 불변식이 아니라서).
 
-#### [done] examples:logger-output
+### [done] examples:logger-output
 예제 출력을 `print`에서 로그 모듈로 옮기고 보기 쉽게 정리했다. 공용 설정은 `examples/setting.toml`
 (콘솔 text.simple·stdout·INFO)이고 `main.py`와 각 `run_ex.py`의 `main()`이 `configure()`한다.
 로거 이름은 예제·계층별로 직접 준다(`ex05.origin`·`ex05.require`·`ex05.dependent`, 소비자는

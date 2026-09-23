@@ -1,13 +1,13 @@
 # TODO
 
-> 형식: `#### [done] <prefix>:<word>` 제목 아래 할 일을 적는다. `<prefix>:<word>`가 항목 구분자이자
+> 형식: `### [done] <prefix>:<word>` 제목 아래 할 일을 적는다. `<prefix>:<word>`가 항목 구분자이자
 > 관련 항목을 묶는 태그다 — 같은 `prefix`를 쓰는 항목은 같은 주제로 읽는다. 완료된 항목 중 아직
 > 열린 항목과 관련이 없어진 것은 `docs/DONE.md`로 옮기고 여기서 지운다(상세 규칙은 `AGENTS.md`
 > "새 세션을 시작할 때" 참고).
 
 > 열린 과제는 policy:callback-exception과 logger:server-transport다.
 
-#### policy:callback-exception
+### policy:callback-exception
 TaskManager: task에서 예외가 발생했을 때 TaskManager 단에서 처리할 방법이 없다. 사용자 콜백
 (`unbind_cb`·`detach_cb`)이 `TaskGroup` 안에서 던지면 `detach()`가 중간에 끊겨 상위 스테이지가
 안 내려가고 `stage.update`/`detach` 교체도 안 된다. generate 콜백의 `finally`도 같은 노출을 갖는다.
@@ -28,7 +28,7 @@ TaskManager: task에서 예외가 발생했을 때 TaskManager 단에서 처리�
 - `domain.py` `_task_sequence()` — `seq.invoke()`가 던지면 슬롯 태스크가 조용히 죽는다.
 - `helper.py` `TaskManager._task_wrapper()` / `on_task_failure()` — 현재 태스크 예외 처리 지점.
 
-#### [done] logger:core
+### [done] logger:core
 프로젝트 전반 로그 모듈(`logger.py`). 설계는 `docs/design.log.md`에 있다. `setting.toml`의 `[log]`
 카테고리로 콘솔·파일·로그서버 스위치를 설정하고, 레코드마다 `service`/`host`/`pid`/`instance_id`로
 발신처를 구분한다. 큐 핸들러는 진짜 루트 로거에 붙어 `trading_core.*`와 바깥 앱의 로거를 같은
@@ -40,7 +40,7 @@ TaskManager: task에서 예외가 발생했을 때 TaskManager 단에서 처리�
 남은 것은 아래 logger:server-transport로 남겨 두었다. 관련 항목이 아직 열려 있어
 `docs/DONE.md`로 옮기지 않았다.
 
-#### logger:server-transport
+### logger:server-transport
 로그서버로 실제 전송하기. `ServerSink.send_batch()`가 `NotImplementedError`다. 배치 버퍼·`dropped`
 카운트까지는 있고(`docs/design.log.md` 7절), 프로토콜(HTTP? WebSocket? UDP?)과 `flush_interval`
 타이머·재시도·백오프는 실제로 붙일 로그서버가 정해지면 같이 정한다. `[log.server] enabled = true`인
