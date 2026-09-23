@@ -14,6 +14,10 @@ from asyncio import (
 from collections.abc import Awaitable, Callable, Coroutine
 from typing import Any
 
+from .logger import get_logger
+
+log = get_logger(__name__)
+
 
 def verify_module(obj: object, _filename: str | None = None):
     module = inspect.getmodule(obj, _filename)
@@ -104,9 +108,7 @@ class TaskManager:
         self._names.add(name)  # 대기 중에도 이름을 점유한다
         self._release_events[name] = Event()
         self._submit_count += 1
-        print("-" * 80)
-        print(f"[TASK SUBMIT({self._submit_count})] - id: {self._id}")
-        print(f"name: {name}")
+        log.debug("태스크 제출", id=self._id, name=name, submit_count=self._submit_count)
         await self._queue.put((coro, name))
 
     @property
@@ -182,19 +184,19 @@ class TaskManager:
     # ======= hooks =======
 
     def on_task_exception(self, exc: Exception, name: str):
-        print("-" * 80)
-        print(f"[TASK ERROR({self._submit_count})] {exc!r} - id: {self._id}")
-        print(f"name: {name}")
+        log.debug(
+            "태스크 예외",
+            id=self._id,
+            name=name,
+            submit_count=self._submit_count,
+            exc_info=exc,
+        )
 
     def on_task_finished(self, name: str):
-        print("-" * 80)
-        print(f"[TASK FINISHED({self._submit_count})] - id: {self._id}")
-        print(f"name: {name}")
+        log.debug("태스크 완료", id=self._id, name=name, submit_count=self._submit_count)
 
     def on_task_cancelled(self, name: str):
-        print("-" * 80)
-        print(f"[TASK CANCELLED({self._submit_count})] - id: {self._id}")
-        print(f"name: {name}")
+        log.debug("태스크 취소", id=self._id, name=name, submit_count=self._submit_count)
 
     # async def on_task_failure(self):
     #     """failure hook (override)"""

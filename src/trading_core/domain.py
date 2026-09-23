@@ -8,6 +8,7 @@ from .binder import (
 )
 from .exceptions import ClosedConnection, DomainError, StageError
 from .helper import TaskManager
+from .logger import get_logger
 from .model import (
     BaseReqModel,
     DataModel,
@@ -21,6 +22,8 @@ from .model import (
     is_generate_model,
     is_instant_model,
 )
+
+log = get_logger(__name__)
 
 
 class TransmitQueue[T]:
@@ -107,7 +110,7 @@ class SendRouter:
                     tg.create_task(sender(data))
                     sent = True
         if not sent:
-            print(f"warning: 데이터를 전송할 'Sender'가 없다. - symbol: {data.symbol}")
+            log.warning("데이터를 전송할 Sender가 없다", symbol=data.symbol)
 
     @property
     def symbols(self) -> set[str]:
