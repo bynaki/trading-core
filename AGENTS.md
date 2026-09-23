@@ -13,16 +13,18 @@ WebSocket 클라이언트가 아니라, 실시간 스트림을 다룰 때 반복
 
 ## 새 세션을 시작할 때
 
-이 파일 다음으로 **`docs/HANDOFF.md`**를 읽는다. 직전 세션이 어디서 멈췄는지, 작업 브랜치,
-사용자에게 확인해야 할 것이 있으면 거기 있다. 그다음 **`docs/TODO.md`**로 남은 과제와 이미 해결한
-불변식의 내력을 확인한다. `HANDOFF.md`는 일을 이어받아 끝내면 지워도 되는 일회성 문서이고,
-`TODO.md`는 세션이 바뀌어도 계속 남는 백로그다 — 새로 안 것이나 남긴 후속 작업은 `HANDOFF.md`가
-아니라 `TODO.md`에 번호를 매겨 적어야 다음 세션도 볼 수 있다.
-
-**`HANDOFF.md`와 `TODO.md`에는 커밋·push 상태를 적지 않는다.** 커밋 해시, 몇 커밋 앞섰는지,
-push했는지, PR·병합 여부 같은 것들이다. 문서를 커밋하는 순간이나 push하는 순간 바로 틀린 말이
-되기 때문이다. 이런 상태는 새 세션에서 `git status`·`git log`로 직접 확인한다. 커밋·push할 때
-사용자에게 묻는 규칙은 "코드 규약"에 있다.
+- 이 파일 다음으로 **`docs/TODO.md`**(세션을 넘어 남는 백로그)를 읽는다. 새로 안 것·남긴 후속
+  작업은 `TODO.md`에 적는다.
+- **`docs/HANDOFF.md`는 있을 때만 읽는다.** 직전 세션이 멈춘 곳을 넘기는 일회성 문서라 평소엔 없다.
+  이어받아 끝내면 지운다.
+- `TODO.md` 항목은 `#### [done] <prefix>:<word>` 제목 아래 내용을 적는다. `<prefix>:<word>`
+  (예: `logger:server-transport`)가 항목 구분자이자 태그이고, 같은 `prefix`는 같은 주제다.
+- 할 일을 마치면 그 자리에서 제목에 `[done]`만 붙인다. `docs/DONE.md`로 옮기는 것은 커밋 때다
+  (아래 "코드 규약"의 커밋 절차).
+- `docs/DONE.md`는 열린 항목과 더 이상 관련 없는 완료 항목의 아카이브다. 매번 읽지 않고, 내력이
+  필요할 때 태그로 찾아본다.
+- `HANDOFF.md`·`TODO.md`에는 **git 상태를 적지 않는다**(커밋 해시, 앞선 커밋 수, 원격·PR·병합
+  여부). 적는 순간 틀린 말이 된다. `git status`·`git log`로 확인한다.
 
 ## 환경
 
@@ -32,21 +34,19 @@ push했는지, PR·병합 여부 같은 것들이다. 문서를 커밋하는 순
 
 ## 명령
 
-모든 명령은 `uv`로 실행한다(`uv run`이 항상 프로젝트 `.venv`를 쓰므로 `activate` 불필요).
+모든 명령은 `uv`로 실행한다(`uv run`이 프로젝트 `.venv`를 쓰므로 `activate` 불필요).
 
 ```bash
 uv run ruff check .          # 린트
 uv run ruff format .         # 포맷 적용
 uv run ruff format --check . # 포맷 검사
 uv run pyright               # 타입 체크 (standard)
-uv run pytest                # 테스트 (약 0.5초 — "테스트" 절 참고)
+uv run pytest                # 테스트 (약 0.5초)
 ```
 
-코드 변경 후 위 4개(check / format / pyright / pytest)가 모두 통과해야 한다.
-테스트가 프레임워크 불변식을 덮지만 예제까지 함께 도는 것은 아니므로, `src/`를 고쳤으면
-`uv run examples/main.py serial`도 한 번 돌려 볼 것.
-
-예제 실행:
+**작업을 마쳤을 때 소스코드(`src/`·`tests/`·`examples/`)를 고쳤다면** 위 4개(check / format --check /
+pyright / pytest)를 모두 통과시킨다. 문서만 고쳤으면 돌리지 않는다. 커밋 절차에는 들어가지 않는다.
+테스트는 예제를 돌리지 않으므로 `src/`를 고쳤으면 `uv run examples/main.py serial`도 돌려 볼 것.
 
 ```bash
 uv run python examples/ex01/run_ex.py # 예제 파일을 직접 실행 (자체 Domain을 만든다)
@@ -55,44 +55,20 @@ uv run examples/main.py serial        # 모든 예제를 공유 Domain에서 순
 uv run examples/main.py parallel      # 모든 예제를 공유 Domain에서 동시 실행
 ```
 
-`examples/main.py`는 `examples/*/run_ex.py`를 글롭으로 찾아 예제 목록을 만든다. `run_ex(domain)`
-코루틴을 가진 디렉터리를 추가하면 인자 목록(`--help`)과 `serial`/`parallel`에 자동으로 포함된다.
+`examples/main.py`는 `examples/*/run_ex.py`를 글롭으로 찾는다 — `run_ex(domain)` 코루틴을 가진
+디렉터리를 추가하면 자동으로 포함된다. 의존성: `uv add <pkg>`(런타임) / `uv add --dev <pkg>`(개발).
 
-의존성: `uv add <pkg>`(런타임) / `uv add --dev <pkg>`(개발).
+## 저장소 메모
 
-## 현재 저장소 상태 (중요)
-
-2026-09-22 기준. 작업 브랜치는 **`feat/log`**다(로그 모듈, `docs/TODO.md` 10번). 커밋·push 상태는
-`git status`·`git log`로 확인한다. `RequestModel`을 **instanter** 실행 경로로 확장한
-`feat/request_model` 브랜치(아래 "instanter" 절)는 이미 `main`에 병합되어 사라졌다.
-
-- 등록 API 리팩터링(`definer.py` → `binder.py`)은 끝났고 `main`에 들어가 있다. `definer.py`
-  (옛 `@generator` / `@task` / `@processor` 레지스트리)는 **삭제**되었고 코드에 옛 API 참조는 없다.
-- `uv run ruff check` · `ruff format --check` · `pyright` · `pytest` **모두 클린이다**
-  (pyright 0 errors, 125 tests passed). `examples/main.py serial`도 ex01~ex09 전부 완주한다.
-- 예제는 `examples/ex01`~`examples/ex09` 아홉 개다. ex06은 파생 스테이지의 "합집합이 그대로면
-  재시작하지 않는다"를, ex07·ex08은 instanter 경로를 다룬다. ex08은 요청형 스테이지가
-  content_id로 공유되지 **않는다**는 것을 원천의 공유와 나란히 보인다.
-  ex09는 로그 모듈 사용 예제다. 전용 `examples/ex09/setting.toml`로 `configure()`하고, 끝에서
-  `shutdown()` 뒤 `logs/ex09.jsonl`을 `instance_id`로 걸러 요약한다. 로그 모듈은 프로세스 전역인 루트 로거를
-  건드리지만 다른 예제는 `print`만 쓰므로 `serial`·`parallel`에서도 서로 영향이 없다.
-- 문서 상태:
-  - `README.md`는 **의도적으로 얇다.** 프로젝트 소개 · 설치 · 예제 실행법 · 범위와 한계만 두고
-    **코드 예제와 API 이름을 넣지 않는다.** API가 아직 자리를 잡는 중이라 문서가 곧 낡기
-    때문이고, 사용법은 실행되는 `examples/`가 담당한다(낡으면 바로 깨지므로 썩지 않는다).
-    기능을 추가했다고 README에 API 설명을 다시 채워 넣지 말 것.
-  - `examples/ex01`~`ex09`의 README와 코드 docstring은 모두 현행 API 기준이다. 예제를 고치면
-    같은 디렉터리의 README도 함께 고칠 것 — 지금은 어긋난 곳이 없다.
-  - 운영 문서(`TODO.md`, `HANDOFF.md`)와 설계 문서는 저장소 루트가 아니라 **`docs/`**에 있다:
-    `docs/TODO.md`, `docs/HANDOFF.md`, `docs/design.log.md`. `README.md`는 위 규칙대로 그대로 얇게 둔다.
-- `docs/TODO.md`에 남은 과제와 이미 해결한 불변식의 내력이 번호 순으로 적혀 있다. 특히 "require 콜백이
-  심볼에 따라 다른 상위 요청을 반환할 수 없다"(2번)는 제약은 현재 구조상 유효하다.
-- 로그 모듈(`logger.py`, TODO 10)은 구현되었다. 설계는 `docs/design.log.md`에 있다. 남은 것은
-  TODO 11(로그서버 실제 전송 — 뼈대만 있고 `ServerSink.send_batch()`가 `NotImplementedError`)과
-  TODO 12(기존 `print`를 이 모듈로 옮기기)로 남겨 두었다.
-- 열린 과제는 1·8번(TaskManager·사용자 콜백의 예외 정책)과 11·12번(로그 모듈 후속)이다. 1·8번은
-  정책이 **사용자 결정 대기** 중이므로 임의로 구현하지 말 것. 제안된 안은 "정리를 끝까지 수행한 뒤
-  `ExceptionGroup`으로 재발생" + "`SendRouter`에서 Sender 하나의 실패를 격리"다.
+- `README.md`는 **의도적으로 얇다** — 소개·설치·예제 실행법·범위와 한계만 둔다. API가 아직
+  자리 잡는 중이라 **코드 예제와 API 이름을 넣지 않는다.** 사용법은 실행되는 `examples/`가 맡는다.
+- 예제를 고치면 같은 디렉터리의 README도 함께 고친다.
+- 운영·설계 문서는 `docs/`에 있다: `TODO.md`, `DONE.md`, `design.log.md`(로그 모듈 설계), 있을 때만
+  `HANDOFF.md`.
+- 예제는 ex01~ex09. ex06은 파생 스테이지의 "합집합이 그대로면 재시작 안 함", ex07·ex08은
+  instanter(ex08은 요청형 스테이지가 content_id로 공유되지 **않음**), ex09는 로그 모듈이다. ex09만
+  프로세스 전역 루트 로거를 `configure()`하고 나머지는 `print`라 `serial`·`parallel`에서 서로
+  영향이 없다.
 - `playground.py`는 타입 실험용 스크래치 파일이다. 정식 예제가 아니다.
 
 ## 아키텍처
@@ -110,8 +86,6 @@ uv run examples/main.py parallel      # 모든 예제를 공유 Domain에서 동
 
 ### 모델 계층
 
-`TrBaseModel`(pydantic `BaseModel`) 아래에 요청 계열과 데이터 계열이 나뉜다.
-
 ```
 TrBaseModel
 ├── BaseReqModel          (_tr_model_type = "unregistered")
@@ -121,22 +95,19 @@ TrBaseModel
 └── DataModel             (_tr_model_type = "data", symbol: str 라우팅 키)
 ```
 
-`_tr_model_type`은 `BindPack.set_*_cb()`가 실행될 때 클래스에 기록된다. 즉 **모듈이 import되어
-데코레이터가 실행되어야** 해당 요청이 사용 가능해진다. `Domain`은 이 값으로 스테이지 종류를 고른다.
+`_tr_model_type`은 `BindPack.set_*_cb()`가 실행될 때 기록된다 — **모듈이 import되어 데코레이터가
+실행되어야** 요청을 쓸 수 있다. `Domain`은 이 값으로 스테이지 종류를 고른다.
 
-식별자 3종은 서로 역할이 다르다 — 헷갈리면 안 된다.
+식별자 3종은 역할이 다르다.
 
 - **instance id** (`_tr_id`, `get_model_inst_id`): `클래스@모듈:출처:순번`. 개별 인스턴스 추적용.
-- **model_id** (`get_model_id`): `클래스@모듈:필드이름구조digest`. `__init_subclass__`에서 계산되며
-  binder 레지스트리 키이자 `cast_model()`의 일치 기준이다(상속 관계가 아니라 정확한 일치를 요구).
-- **content_id** (`get_tr_content_id()`): 모델 타입 + JSON 직렬화 내용의 digest.
-  **동일 원천 공유의 기준**이다. 필드 값이 같은 요청은 같은 origin stage를 쓴다.
+- **model_id** (`get_model_id`): `클래스@모듈:필드이름구조digest`. binder 레지스트리 키이자
+  `cast_model()`의 일치 기준(상속이 아니라 정확한 일치).
+- **content_id** (`get_tr_content_id()`): 모델 타입 + JSON 직렬화 내용의 digest. **원천 공유의 기준**.
 
-모델은 **가변**이다. `__setattr__`이 content_id 캐시를 무효화한다. 그래서 요청 모델을 `set`에
-넣거나 dict 키로 쓰면 안 된다(hashable이 아니다). 모아 둘 일이 있으면 content_id를 키로 쓴다.
-
-모든 모델은 직렬화 시 `tr_annotation`(computed field)을 포함하고, `validate_model()`은 이 annotation의
-`module_name`/`model_name`으로 클래스를 되찾아 복원한다.
+모델은 **가변**이고 `__setattr__`이 content_id 캐시를 무효화한다. 그래서 hashable이 아니다 —
+`set`·dict 키로 쓰지 말고 content_id를 키로 쓴다. 직렬화 시 `tr_annotation`이 붙고,
+`validate_model()`은 그 `module_name`/`model_name`으로 클래스를 되찾아 복원한다.
 
 ### 등록 (binder.py)
 
@@ -153,10 +124,11 @@ async def _(ctx: NamingAllContext, symbols: set[str]):
 async def _(ctx: NamingAllContext): ...
 ```
 
-- `initialize()`는 `get_type_hints(cb)`의 **첫 값**을 요청 타입으로 쓴다. 따라서 init 콜백의
-  파라미터 어노테이션이 반드시 있어야 하고, 요청 타입에 따라 `GenerateModelBinder` /
-  `DependentModelBinder` / `RequestModelBinder` 중 하나가 반환된다.
-- `DependentModel`은 `require`로 상위 요청을 선언한다. **인자 없는** 데코레이터이고 두 형태를 받는다:
+- `initialize()`는 `get_type_hints(cb)`의 **첫 값**을 요청 타입으로 쓴다(어노테이션 필수). 요청 타입에
+  따라 `GenerateModelBinder` / `DependentModelBinder` / `RequestModelBinder`를 반환한다.
+- `DependentModel`은 **인자 없는** 데코레이터 `require`로 상위 요청을 선언한다. 두 형태를 받고
+  위치 인자 개수로 구분해 `RequireCbWithSym`으로 정규화한다. require 없이 파생 스테이지를 만들면
+  `ModelError`.
 
   ```python
   @NamingReq.require                    # RequireCb — 요청만 받는다
@@ -168,52 +140,40 @@ async def _(ctx: NamingAllContext): ...
       return origin.TickReq(), {f"{s}/USD" for s in symbols}
   ```
 
-  둘은 위치 인자 개수로 구분되어 `RequireCbWithSym`으로 정규화된다. 등록 순서는 강제되지 않지만
-  (generate 바인드 뒤에 선언해도 등록은 통과한다) 예제는 모두 require를 먼저 쓴다. require 없이
-  파생 스테이지를 만들면 그때 `ModelError`가 난다.
-- dependent binder의 시그니처는 `(ctx, symbols, recv: Receiver)`로 인자가 하나 더 많다.
-  `recv()`로 상위 원천 데이터를 받아 `cast_model()`로 좁혀 쓴다.
-- `RequestModel`은 콜백 네 종을 붙인다 — `@x`(bind) · `@x.unbind` · `@x.require` · `@x.detached`.
-  bind와 require는 각각 하나만 등록되고 두 번째는 `BindError`다. 아래 "instanter" 절 참고.
-- `BindPack._binder_dict`는 **프로세스 전역 클래스 변수**다. 같은 `model_id`를 두 번 등록하면
-  `BindError`가 난다. 테스트에서 예제 모듈을 여러 번 import해도 등록은 한 번뿐이라는 전제를 갖는다.
+- dependent binder는 `(ctx, symbols, recv: Receiver)` — `recv()`로 상위 데이터를 받아 `cast_model()`로 좁힌다.
+- `RequestModel`은 `@x`(bind) · `@x.unbind` · `@x.require` · `@x.detached`를 붙인다. bind와 require는
+  하나씩만 등록되고 두 번째는 `BindError`.
+- `BindPack._binder_dict`는 **프로세스 전역**이다. 같은 `model_id`를 두 번 등록하면 `BindError`.
 
 ### 실행 (domain.py)
 
 핵심 불변식:
 
-1. **content_id 단위 공유** — `_origin_stage_dict[content_id]`에 origin stage가 하나만 존재한다.
-   여러 소비자가 같은 요청을 보내면 컨텍스트와 generator를 공유한다.
-2. **심볼 합집합** — `SendRouter`가 (Sender, symbols) 쌍을 모으고, binder에는 **합집합**만 넘긴다.
-   출력은 `data.symbol`을 구독한 Sender에게만 fan-out된다.
-3. **합집합이 바뀔 때만 재시작** — `update()`는 `current_symbols == active_symbols`면 즉시 반환한다.
-   달라지면 이름으로 태스크를 취소하고 `gen.aclose()` 후 새 generator를 만든다. (원천·파생 한정.
-   instanter는 generator가 없고 슬롯을 더하고 뺀다.)
-4. **두 개의 정리 지점** — binder의 `finally`는 *구독 업데이트 단위* 정리, `@x.detached`는
-   *스테이지 전체* 정리다. 합집합이 빈 집합이 되면 stage를 dict에서 제거하고 detach 콜백을 부른다.
-5. **`update(symbols)`는 교체이지 추가가 아니다.** 빈 집합을 넘기면 그 소비자의 구독이 사라진다.
-6. **bind ↔ unbind 짝** — instanter에서 `bind_cb`로 연 심볼은 `update()`로 빠지든 `detach()`로
-   닫히든 `unbind_cb`가 **정확히 한 번** 불린다. 두 경로가 `unbind_symbols()` 헬퍼를 공유하고,
-   슬롯 닫기는 `close_slots()`가 슬롯 태스크의 이름 해제까지 기다린다.
+1. **content_id 단위 공유** — `_origin_stage_dict[content_id]`에 origin stage가 하나만 있다.
+   같은 요청의 소비자들은 컨텍스트와 generator를 공유한다.
+2. **심볼 합집합** — `SendRouter`가 (Sender, symbols)를 모아 binder에는 **합집합**만 넘기고,
+   출력은 `data.symbol`을 구독한 Sender에게만 fan-out한다.
+3. **합집합이 바뀔 때만 재시작** — `current_symbols == active_symbols`면 `update()`는 즉시 반환한다.
+   달라지면 태스크를 이름으로 취소하고 `gen.aclose()` 후 새 generator를 만든다(원천·파생 한정).
+4. **두 개의 정리 지점** — binder의 `finally`는 구독 업데이트 단위, `@x.detached`는 스테이지 전체.
+   합집합이 비면 stage를 dict에서 빼고 detach 콜백을 부른다.
+5. **`update(symbols)`는 교체다.** 빈 집합을 넘기면 그 소비자의 구독이 사라진다.
+6. **bind ↔ unbind 짝** — instanter에서 `bind_cb`로 연 심볼은 `update()`로 빠지든 `detach()`로 닫히든
+   `unbind_cb`가 **정확히 한 번** 불린다(`unbind_symbols()` 공유). 슬롯 닫기(`close_slots()`)는 슬롯
+   태스크의 이름 해제까지 기다린다.
 
-두 가지 소비 API:
+소비 API: `Domain.request(req, symbols)`는 async generator를 준다(`aclosing`으로 감싸 조기 `break`에도
+정리). `Domain.stage(req, sender)`는 호출자가 `Sender`를 주고 `stage.update(symbols)`로 심볼을 교체하는
+저수준 API다. `Stage`는 `_STAGE_CREATION_KEY` 가드로 `Domain`을 통해서만 만들어진다.
 
-- `Domain.request(req, symbols)` — 내부에서 `TransmitQueue`와 Stage를 만들어 async generator를 준다.
-  `aclosing`으로 감싸져 있어 조기 `break`에도 구독이 정리된다.
-- `Domain.stage(req, sender)` — 호출자가 `Sender`를 제공하고 `stage.update(symbols)`로 실행 중
-  심볼 집합을 교체하는 저수준 API.
-
-의존 스트림은 `_ensure_require_stage()`가 상위 요청의 origin stage를 만들거나 재사용하고,
-`TransmitQueue`로 상위 출력을 하위 binder의 `recv`에 연결한다. 상위 원천도 동일하게 content_id와
-합집합 기준으로 공유된다. 순환 의존은 지원하지 않는다.
-
-`Stage`는 `_STAGE_CREATION_KEY` 가드로 `Domain`을 통해서만 생성된다.
+의존 스트림: `_ensure_require_stage()`가 상위 origin stage를 만들거나 재사용하고 `TransmitQueue`로
+하위 binder의 `recv`에 잇는다. 상위도 content_id·합집합 기준으로 공유된다. 순환 의존은 지원하지 않는다.
+파생 스테이지는 상위 하나만 바라보므로 **require 콜백이 심볼에 따라 다른 상위 요청을 반환할 수 없다.**
 
 #### instanter (RequestModel)
 
-`GenerateModel`·`DependentModel`이 "심볼 집합 하나 → generator 하나"라면, `RequestModel`은
-**심볼마다 슬롯 하나**를 만들고 각 슬롯이 `Sequence`로 상위 원천에 붙는 구조다
-(`Domain._define_inst_stage()`). ex07과 `tests/support/streams.py`의 `SwingReq`가 예다.
+원천·파생이 "심볼 집합 하나 → generator 하나"라면, instanter는 **심볼마다 슬롯 하나**를 만들고 각
+슬롯이 `Sequence`로 상위 원천에 붙는다(`Domain._define_inst_stage()`, 예: ex07, 테스트의 `SwingReq`).
 
 ```python
 @swing                                   # bind — 심볼 하나의 Sequence를 yield
@@ -228,67 +188,45 @@ async def _(ctx: SwingCtx):
     yield TickReq()("HEARTBEAT/USD") | ...
 ```
 
-`Sequence`는 `req(symbol) | Runnable | ...`로 만든다. **상위 표기와 하위 표기를 구분해야 한다.**
+**상위 표기와 하위 표기를 구분한다.** `req(symbol)`의 `symbol`은 상위 표기(원천이 아는 `"BTC/USD"`),
+bind 콜백이 받는 `symbol`은 하위 표기(소비자가 구독한 `"BTC"`)다. 상·하위가 같은 요청으로만 시험하면
+둘을 뒤바꾼 버그가 안 드러난다.
 
-- `req(symbol)`의 `symbol`은 **상위 표기** — 원천 generator가 아는 심볼(`"BTC/USD"`).
-- bind 콜백이 받는 `symbol`은 **하위 표기** — 소비자가 구독한 심볼(`"BTC"`).
-- 둘이 달라도 되게 하는 것이 이 모델의 존재 이유다. 상·하위가 같은 요청으로만 시험하면
-  둘을 뒤바꾼 버그가 드러나지 않는다.
-
-주의할 점:
-
-- **상위 스테이지에 등록하는 심볼은 `reg.router.symbols`**, 즉 시퀀스가 요구한 상위 표기다.
-  스테이지가 받은 하위 심볼이 아니다.
-- **`"__require__"`는 슬롯 키 센티널**이다. `req_cb`가 만든 슬롯이라 `bind_cb`가 연 적이 없고,
-  따라서 `unbind_cb`도 부르지 않는다. `update()`가 빼는 심볼(`active_symbols - current_symbols`)에도
-  `detach()`의 unbind 대상에도 들어가지 않는다. 반대로 이 센티널이 실제 심볼 계산(`new_symbols`)에
-  섞이면 binder가 그것을 심볼인 양 받는다.
-- **`SendRouterSet`은 content_id별로 `SendRouter` 하나를 유지한다.** `clear()`는 라우터만 비우고
-  `Registered` 항목은 남긴다 — 같은 content_id에 같은 `SendRouter` **객체**가 유지되어야 스테이지에
-  등록된 `Sender`와의 동일성 검사가 깨지지 않는다. 다시 채운 뒤 `prune()`이 센더가 없는 항목만
-  지우고, 그 상위 스테이지는 같은 `update()`에서 떼어 낸다(빈 상위를 `active_stage_set`에 남기면
-  갱신마다 원천이 새로 만들어졌다 정리된다).
-- 데이터 흐름: 원천 → `SendRouter`(상위 표기로 라우팅) → `SequenceSender` → 슬롯의 `TransmitQueue`
-  → `_task_sequence()`가 `seq.invoke()`를 거쳐 소비자에게 보낸다.
-- **슬롯은 상위 구독이 갱신되기 전에 닫힌다.** 그 사이 닫힌 슬롯으로 온 데이터는 `SequenceSender`가
-  `ClosedConnection`을 삼켜 버린다. 이 예외가 `SendRouter`로 올라가면 **공유된 상위 generator가
-  죽고**, 같은 상위 심볼을 다른 소비자가 구독 중이면 합집합이 그대로라 재시작되지도 않는다.
+- 상위 스테이지에 등록하는 심볼은 `reg.router.symbols`(상위 표기)다. 하위 심볼이 아니다.
+- `"__require__"`는 `req_cb` 슬롯의 키 센티널이다. bind된 적이 없으므로 `unbind_cb` 대상이 아니고,
+  실제 심볼 계산(`new_symbols`)에 섞여서도 안 된다.
+- `SendRouterSet`은 content_id별로 `SendRouter` **객체** 하나를 유지한다(`Sender` 동일성 검사 때문).
+  `clear()`는 라우터만 비우고, 다시 채운 뒤 `prune()`이 센더 없는 항목을 지우며 그 상위 스테이지를
+  같은 `update()`에서 떼어 낸다.
+- 데이터 흐름: 원천 → `SendRouter`(상위 표기) → `SequenceSender` → 슬롯 `TransmitQueue` →
+  `_task_sequence()`가 `seq.invoke()`를 거쳐 소비자에게.
+- 슬롯은 상위 구독 갱신보다 먼저 닫히므로, 닫힌 슬롯으로 온 데이터의 `ClosedConnection`은
+  `SequenceSender`가 삼킨다. 올려 보내면 공유된 상위 generator가 죽는다.
 
 ### TaskManager (helper.py)
 
-`Domain`의 모든 generator 루프는 `TaskManager.submit(coro, name)`으로 실행된다. 이름이 태스크의
-정체성이며 **대기 중에도 이름이 점유**된다. `cancel_by_name()`은 실행 중이면 취소 후 `gather`로,
-큐 대기 중이면 `_cancelled_pending`에 예약한 뒤 release 이벤트로 **이름 해제까지 기다린다**.
-이 대기가 없으면 `Domain`이 같은 이름으로 재제출할 때 이름 충돌이 난다.
-
-`TaskManager`와 예제 binder는 진단용 `print`를 그대로 출력한다(`[TASK SUBMIT]` 등).
+`Domain`의 generator 루프는 모두 `TaskManager.submit(coro, name)`으로 돈다. 이름이 태스크의 정체성이고
+**대기 중에도 점유**된다. `cancel_by_name()`은 실행 중이면 취소 후 `gather`, 대기 중이면
+`_cancelled_pending`에 예약하고, 어느 쪽이든 **이름 해제까지 기다린다**(안 그러면 같은 이름 재제출이
+충돌한다). 제출·완료·취소·예외 훅은 `logger.py`로 DEBUG 로그를 남긴다.
 
 ## 코드 규약
 
-- Python **3.14** 전용. PEP 695 제네릭 문법(`class Stage[T: BaseReqModel]`, `type X = ...`)을 사용하고
+- Python **3.14** 전용. PEP 695 제네릭 문법(`class Stage[T: BaseReqModel]`, `type X = ...`)을 쓰고
   `TypeVar`를 새로 도입하지 않는다.
 - ruff: line-length 100, rules `E,F,I,UP,B`. pyright `standard`, `src`/`tests`/`examples` 포함.
 - 런타임 의존성은 pydantic 하나뿐이다. 새 런타임 의존성을 추가하기 전에 확인할 것.
 - 커밋 메시지는 Conventional Commits(`feat:`, `fix:`, `docs:`)를 쓴다.
-- **커밋하기 전에 검증하고, 사용자에게 묻는다.** 먼저 "명령" 절의 4개(check / format / pyright /
-  pytest)를 돌리고 `src/`를 고쳤으면 `examples/main.py serial`까지 돌린다. 그 결과와 커밋할 변경
-  내용(파일·메시지)을 보여 주고 사용자가 승인한 뒤에만 커밋한다. 작업 계획이 승인되었어도 커밋
-  승인은 따로 받는다. push도 마찬가지다.
-- **커밋·push 전에 개인정보 노출과 보안 취약점을 검사한다.** 커밋할 diff(push라면 올라갈 커밋
-  전체)에서 다음이 없는지 확인하고, 검사 결과도 승인 요청에 함께 보고한다.
-  - 개인정보: 이메일·전화번호·실명·계정 ID, 로컬 절대 경로(`/root/...`, `/home/<사용자>/...`)
-  - 비밀값: API 키·시크릿·토큰·비밀번호·개인 키, `.env`·인증서 같은 비밀 파일
-  - 취약점: 입력을 검증 없이 `eval`/`exec`/`pickle`/셸 명령에 넘기는 코드, 예외 메시지·로그로 새는
-    민감 정보, 검증 없이 새로 추가한 의존성
-  발견하면 커밋하지 말고 사용자에게 알린다.
-- `async for x in cb(...): yield x` 형태로 async generator를 감쌀 때는 `contextlib.aclosing`으로
-  감쌀 것. 그러지 않으면 바깥을 `aclose()`해도 **안쪽 generator의 `finally`가 돌지 않는다.**
+- **커밋은 사용자가 요청하고 승인했을 때만 한다.** 절차는 프로젝트 스킬
+  `.claude/skills/commit/SKILL.md`(`/commit`)를 따른다: TODO→DONE 이관 → 개인정보·보안 검사 →
+  보고·승인 → 커밋. 스킬을 쓸 수 없는 에이전트도 이 파일을 읽고 같은 순서를 지킨다.
+- `async for x in cb(...): yield x`로 async generator를 감쌀 때는 `contextlib.aclosing`으로 감싼다.
+  안 그러면 바깥을 `aclose()`해도 **안쪽 generator의 `finally`가 돌지 않는다.**
 
 ## 테스트
 
-테스트는 예제를 import하지 않는다. 예제는 발행 간격이 0.5초라 느리고, 예제를 고치면 테스트가
-같이 깨지기 때문이다. 대신 `tests/support/streams.py`에 **테스트 전용 요청·binder**를 두고
-발행 간격을 0.01초로 잡았다.
+테스트는 예제를 import하지 않는다(예제는 발행 간격 0.5초로 느리고, 예제를 고치면 테스트가 깨진다).
+대신 `tests/support/streams.py`에 발행 간격 0.01초의 **테스트 전용 요청·binder**를 둔다.
 
 | 파일 | 덮는 범위 |
 | --- | --- |
@@ -302,48 +240,29 @@ async def _(ctx: SwingCtx):
 | `tests/test_logger.py` | 설정 탐색·검증, JSON 레코드·발신처, 싱크별 레벨, 파일 회전, 재구성·종료 |
 | `tests/test_domain.py` | content_id 단위 공유, 심볼 합집합, 재시작 조건, 두 정리 지점, 의존 스트림, instanter |
 
-옛 테스트를 되살리지 말 것 — 참고할 일이 있으면 `ff64509` 이전 이력에서 꺼내 보면 된다.
-ex05가 남긴 "파생 스테이지가 상위에 등록하는 심볼은 구독자 전체의 합집합"이라는 불변식은
-`test_dependent_registers_the_union_upstream`이 덮는다(내력은 `1510812` 참고).
+잘 깨지지 않는 불변식과 그것을 덮는 테스트(고칠 때 이 테스트가 깨지는지 본다):
 
-"합집합이 그대로면 재시작하지 않는다"는 규칙은 두 분기 모두 덮여 있다. 원천 분기는
-`test_origin_restarts_only_when_the_union_changes`가, 파생 분기는
-`test_dependent_restarts_only_when_the_union_changes`가 맡는다. 후자는 ex06과 같은 시나리오이며,
-`domain.py`의 dependent 조기 반환을 지우면 이 테스트만 깨진다.
+| 불변식 | 테스트 | 주의 |
+| --- | --- | --- |
+| 파생이 상위에 등록하는 심볼 = 구독자 합집합 | `test_dependent_registers_the_union_upstream` | |
+| 합집합이 그대로면 재시작 안 함 | `test_origin_restarts_only_when_the_union_changes`, `test_dependent_restarts_only_when_the_union_changes` | 후자는 ex06 시나리오 |
+| 상·하위 표기 매핑 | `test_instant_stage_maps_symbols_to_the_upstream` | 표기가 **다른** `SwingReq`(`BTC`→`BTC/USD`)라야 잡힌다 |
+| bind↔unbind 정확히 한 번 | `test_instant_unbinds_each_symbol_exactly_once` | 〃 |
+| 센티널 슬롯은 unbind 안 함 | `test_instant_require_slot_is_not_unbound` | 〃 |
+| 빼자마자 재구독 가능 | `test_instant_symbol_can_be_resubscribed_right_away` | `BlockingRecorder`로 슬롯 태스크를 묶어야 드러난다 |
+| 안 쓰이는 상위를 떼어 냄 | `test_instant_detaches_an_upstream_no_sequence_uses` | 심볼마다 다른 상위를 드는 `SplitReq` |
+| 닫힌 슬롯이 상위를 죽이지 않음 | `test_sequence_sender_drops_data_for_a_closed_slot` | 경합이라 단위 테스트로 고정 |
+| 요청형 스테이지는 content_id로 공유 안 함 | `test_equal_instant_requests_do_not_share_a_stage` | ex08 시나리오. 짝: `test_equal_requests_share_one_origin_stage` |
 
-instanter 경로는 `test_domain.py`의 `instanter 스트림` 절이 덮는다. 상·하위 표기 혼동은
-`test_instant_stage_maps_symbols_to_the_upstream`이, bind↔unbind 짝은
-`test_instant_unbinds_each_symbol_exactly_once`가, 센티널 취급은
-`test_instant_require_slot_is_not_unbound`가 맡는다. 이 셋은 상·하위 표기가 **다른** 요청
-(`SwingReq`: `BTC` → `BTC/USD`)을 쓰기 때문에 성립한다 — 같은 표기로 바꾸면 못 잡는다.
-슬롯을 닫을 때 태스크 이름 해제까지 기다리는 것(TODO 7)은
-`test_instant_symbol_can_be_resubscribed_right_away`가 맡는다. 소비자가 빠르면 옛 태스크가 우연히
-먼저 끝나 통과하므로, `BlockingRecorder`로 슬롯 태스크를 전송에 묶어 둬야 드러난다.
-안 쓰이게 된 상위를 떼어 내는 것(TODO 5)은 `test_instant_detaches_an_upstream_no_sequence_uses`가
-맡는다. 심볼마다 **다른** 상위를 드는 `SplitReq`를 써야 상위 하나가 통째로 안 쓰이게 된다.
-닫힌 슬롯이 상위를 죽이지 않는 것(TODO 9)은 경합이라 통합 테스트로는 간헐적으로만 드러나므로,
-`test_transport.py`의 `test_sequence_sender_drops_data_for_a_closed_slot`이 단위로 고정한다.
+테스트를 쓸 때 걸리는 제약:
 
-"content_id가 같아도 요청형 스테이지는 공유되지 않는다"는 ex08과 같은 시나리오인
-`test_equal_instant_requests_do_not_share_a_stage`가 맡는다. 원천 쪽 짝인
-`test_equal_requests_share_one_origin_stage`와 나란히 읽으면 공유의 경계가 보인다.
-`_define_stage()`에서 instanter를 content_id로 캐시하도록 바꾸면 이 테스트만 깨진다.
-
-테스트를 더 쓸 때 걸리는 제약:
-
-- `asyncio_mode = "auto"`이므로 async 테스트에 `@pytest.mark.asyncio`가 필요 없다.
-- `BindPack._binder_dict`가 **프로세스 전역**이라 같은 요청 타입을 두 번 등록하면 `BindError`가 난다.
-  그래서 binder는 모듈 수준에서 한 번만 등록하고, 테스트끼리는 요청의 `tag` 필드 값을 달리해
-  **서로 다른 content_id = 서로 다른 스테이지**로 격리한다. 같은 `tag`를 두 테스트가 쓰면 스테이지와
-  기록을 공유하게 된다.
-- generator (재)시작은 `TaskManager.submit()`을 거치므로 `update()` 직후에는 아직 실행되지 않았다.
-  "재시작했다"는 `wait_until()`로 기다려 확인하고, 동기적으로 단정할 수 있는 것은 `SendRouter`에
-  등록된 심볼(`origin.output.symbols`)뿐이다. instanter의 `unbind_cb`는 예외로, `update()`가
-  `TaskGroup`으로 await하므로 반환 직후에 단정할 수 있다.
-- binder는 무한히 데이터를 발행하므로 소비 개수나 `Recorder.wait_for()`로 종료를 제어해야 한다.
-- `test_logger.py`는 **프로세스 전역인 루트 로거**를 건드린다. autouse 픽스처가 CWD·환경변수를 격리하고
-  끝나면 `shutdown()`으로 루트 로거의 핸들러·레벨을 되돌린다(`_state.closed`도 풀어 다음 테스트가 자동
-  구성을 다시 시험할 수 있게 한다). 레코드는 파일 싱크를 켜고 `shutdown()`으로 큐를 비운 뒤 읽는다 —
-  출력은 리스너 스레드가 하므로 그 전에는 아직 안 써졌을 수 있다.
-- 새 불변식을 테스트로 덮었으면 **수정을 되돌려 그 테스트만 깨지는지** 확인할 것. 안 깨지면
-  테스트가 그 불변식을 못 덮고 있는 것이다.
+- `asyncio_mode = "auto"` — `@pytest.mark.asyncio`가 필요 없다.
+- binder 레지스트리가 프로세스 전역이라 binder는 모듈 수준에서 한 번만 등록한다. 테스트끼리는 요청의
+  `tag` 값을 달리해 **다른 content_id = 다른 스테이지**로 격리한다(같은 `tag`면 스테이지·기록 공유).
+- generator (재)시작은 `TaskManager.submit()`을 거쳐 `update()` 직후엔 아직 안 돌았다. 재시작은
+  `wait_until()`로 확인하고, 동기로 단정할 수 있는 건 `origin.output.symbols`뿐이다. 예외로 instanter의
+  `unbind_cb`는 `update()`가 await하므로 반환 직후 단정할 수 있다.
+- binder는 무한히 발행하므로 소비 개수나 `Recorder.wait_for()`로 끝낸다.
+- `test_logger.py`는 전역 루트 로거를 건드린다. autouse 픽스처가 CWD·환경변수를 격리하고 `shutdown()`으로
+  되돌린다. 레코드는 파일 싱크를 켜고 `shutdown()`으로 큐를 비운 뒤 읽는다(리스너 스레드가 쓴다).
+- 새 불변식을 테스트로 덮었으면 **수정을 되돌려 그 테스트만 깨지는지** 확인한다.
