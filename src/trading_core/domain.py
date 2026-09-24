@@ -1,159 +1,28 @@
-from asyncio import Lock, Queue, QueueShutDown, TaskGroup
+from asyncio import Lock, TaskGroup
 from collections.abc import AsyncGenerator, Coroutine
 from contextlib import aclosing, asynccontextmanager
-from typing import Any, NamedTuple, cast
+from typing import Any
 
-from .binder import (
-    BindPack,
-)
-from .exceptions import ClosedConnection, DomainError, StageError
-from .helper import TaskManager
-from .logger import get_logger
+from .binder import BindPack
+from .exceptions import ChannelClosed, DomainError, StageError
 from .model import (
-    BaseReqModel,
+    BaseRequest,
     DataModel,
-    DependentModel,
+    DerivedRequest,
+    Pipeline,
     Receiver,
     Sender,
-    Sequence,
     get_model_id,
     get_model_type,
-    is_dependent_model,
-    is_generate_model,
-    is_instant_model,
+    is_derived,
+    is_session,
+    is_source,
 )
+from .routing import Channel, PipelineSender, SymbolRouter, UpstreamRouters
+from .tasks import TaskManager
 
-log = get_logger(__name__)
-
-
-class TransmitQueue[T]:
-    def __init__(self):
-        self._q = Queue[T]()
-
-    async def send(self, data: T) -> None:
-        try:
-            return await self._q.put(data)
-        except QueueShutDown as exc:
-            raise ClosedConnection("'TransmitQueue'가 이미 닫혔다. - send()") from exc
-
-    async def __call__(self, data: T) -> None:
-        return await self.send(data)
-
-    async def recv(self) -> T:
-        try:
-            return await self._q.get()
-        except QueueShutDown as exc:
-            raise ClosedConnection("'TransmitQueue'가 이미 닫혔다. - recv()") from exc
-
-    def shutdown(self):
-        self._q.shutdown()
-
-
-class SequenceSender:
-    def __init__(self, sender: Sender[tuple[DataModel, Sequence]], seq: Sequence):
-        self._sender = sender
-        self._sequence = seq
-
-    @property
-    def origin_sender(self):
-        return self._sender
-
-    @property
-    def sequence(self):
-        return self._sequence
-
-    async def __call__(self, data: DataModel):
-        try:
-            await self._sender((data, self._sequence))
-        except ClosedConnection:
-            # 슬롯은 상위 구독이 갱신되기 전에 닫힌다. 그 사이 온 데이터는 받을 소비자가
-            # 없으므로 버린다. 예외로 올리면 `SendRouter`를 거쳐 공유된 상위 generator가
-            # 죽고, 다른 소비자가 같은 상위 심볼을 계속 구독 중이면 재시작되지도 않는다.
-            pass
-
-
-class SendRouter:
-    def __init__(self):
-        self._route_dict: dict[str, set[Sender[DataModel]]] = {}
-
-    def add(self, sender: Sender[DataModel], symbol: str):
-        if not symbol:
-            raise DomainError("`symbol`은 한문자라도 있어야 한다.")
-        if tt := self._route_dict.get(symbol):
-            ...
-        else:
-            tt = set()
-            self._route_dict[symbol] = tt
-        tt.add(sender)
-
-    def remove(self, sender: Sender[DataModel], symbol: str = ""):
-        if symbol:
-            if ss := self._route_dict.get(symbol):
-                ss.discard(sender)
-        else:
-            for ss in self._route_dict.values():
-                ss.discard(sender)
-
-    def set_sender(self, sender: Sender[DataModel], symbols: set[str]):
-        self.remove(sender)
-        for symbol in symbols:
-            self.add(sender, symbol)
-
-    def clear(self):
-        self._route_dict.clear()
-
-    async def __call__(self, data: DataModel):
-        sent = False
-        if sender_set := self._route_dict.get(data.symbol):
-            async with TaskGroup() as tg:
-                for sender in sender_set:
-                    tg.create_task(sender(data))
-                    sent = True
-        if not sent:
-            log.warning("데이터를 전송할 Sender가 없다", symbol=data.symbol)
-
-    @property
-    def symbols(self) -> set[str]:
-        return {symbol for symbol, ss in self._route_dict.items() if ss}
-
-
-class Registered(NamedTuple):
-    content_id: str
-    require: BaseReqModel
-    router: SendRouter
-
-
-class SendRouterSet:
-    def __init__(self):
-        # `Registered`는 요청 모델을 품고 있어 해시할 수 없다. content_id를 키로 쓴다.
-        self._registered_dict: dict[str, Registered] = {}
-
-    def add_sender(self, req: BaseReqModel, sender: SequenceSender):
-        content_id = req.get_tr_content_id()
-        reg = self._registered_dict.get(content_id)
-        if reg is None:
-            reg = Registered(content_id, req, SendRouter())
-            self._registered_dict[content_id] = reg
-        reg.router.add(sender, sender.sequence.symbol)
-
-    def clear(self):
-        # 라우터만 비우고 `Registered`는 남긴다. content_id마다 같은 `SendRouter`
-        # 객체가 유지되어야 스테이지에 등록된 `Sender`와 동일성이 깨지지 않는다.
-        for reg in self._registered_dict.values():
-            reg.router.clear()
-
-    def prune(self):
-        """센더가 하나도 남지 않은 항목을 지운다. `clear()` 뒤 다시 채운 다음에 부른다.
-
-        지운 항목의 상위 스테이지는 같은 갱신에서 떼어 내므로, 나중에 같은 content_id가
-        다시 쓰이면 새 `SendRouter`와 새 스테이지가 짝지어져 동일성 검사가 깨지지 않는다.
-        """
-
-        for content_id in [c for c, reg in self._registered_dict.items() if not reg.router.symbols]:
-            del self._registered_dict[content_id]
-
-    def __call__(self):
-        yield from self._registered_dict.values()
+_ALWAYS_SLOT = "__always__"
+"""세션 요청의 `always` 파이프라인이 쓰는 슬롯 키. bind된 적이 없으므로 unbind 대상이 아니다."""
 
 
 class _StageCreationKey:
@@ -163,306 +32,325 @@ class _StageCreationKey:
 _STAGE_CREATION_KEY = _StageCreationKey()
 
 
-class BaseStage[T: BaseReqModel]:
-    def __init__(self, key: _StageCreationKey, /, id: str, request: T, output: Sender) -> None:
+class BaseStage[T: BaseRequest]:
+    def __init__(self, key: _StageCreationKey, /, id: str, request: T) -> None:
         if key is not _STAGE_CREATION_KEY:
-            raise TypeError("'Stage'는 'Domain'을 통해서만 생성할 수 있다.")
+            raise TypeError("구독과 스테이지는 'Domain'을 통해서만 생성할 수 있다.")
         self._id = id
-        self._req_model = request
-        self._output = output
+        self._request = request
 
     @property
     def id(self) -> str:
         return self._id
 
     @property
-    def req_model(self) -> T:
-        return self._req_model
+    def request(self) -> T:
+        return self._request
+
+
+class Subscription[T: BaseRequest](BaseStage[T]):
+    """`Domain.subscribe()`가 돌려주는 구독. `update()`로 심볼을 바꾸고 `detach()`로 끊는다."""
+
+    def __init__(self, key: _StageCreationKey, /, id: str, request: T, sender: Sender) -> None:
+        super().__init__(key, id, request)
+        self._sender = sender
 
     @property
-    def output(self) -> Sender:
-        return self._output
+    def sender(self) -> Sender:
+        return self._sender
 
-
-class Stage[T: BaseReqModel](BaseStage[T]):
     async def update(self, symbols: set[str]) -> None:
+        """구독 심볼을 `symbols`로 바꾼다. 빈 집합이면 구독이 사라진다."""
         raise StageError("'update()'가 구현되지 않았다.")
 
     async def detach(self) -> None:
         raise StageError("'detach()'가 구현되지 않았다.")
 
 
-class OriginStage[T: BaseReqModel](BaseStage[T]):
+class SharedStage[T: BaseRequest](BaseStage[T]):
+    """content_id가 같은 원천·파생 요청이 공유하는 스테이지."""
+
     def __init__(self, key: _StageCreationKey, /, id: str, request: T) -> None:
-        super().__init__(key, id, request, SendRouter())
+        super().__init__(key, id, request)
+        self._router = SymbolRouter()
 
     async def update(self, sender: Sender, symbols: set[str]) -> None:
         raise StageError("'update()'가 구현되지 않았다.")
 
     @property
-    def output(self) -> SendRouter:
-        return cast(SendRouter, self._output)
+    def router(self) -> SymbolRouter:
+        return self._router
+
+
+def _mark_detached(sub: Subscription) -> None:
+    """끊긴 구독의 `update()`·`detach()`가 `DomainError`를 던지게 한다."""
+
+    async def detached_update(symbols: set[str]):
+        raise DomainError("이미 `detach`되었다.")
+
+    async def detached_detach():
+        raise DomainError("이미 `detach`되었다.")
+
+    sub.update = detached_update
+    sub.detach = detached_detach
 
 
 class Domain:
     def __init__(self) -> None:
-        self._tmg = TaskManager()
-        self._origin_stage_dict: dict[str, OriginStage] = {}
-        self._count = 0
+        self._tasks = TaskManager()
+        self._shared_stages: dict[str, SharedStage] = {}
+        self._stage_seq = 0
 
     @asynccontextmanager
-    async def stage(self, req: BaseReqModel, output: Sender):
-        stage = self._define_stage(req, output)
+    async def subscribe(self, req: BaseRequest, sender: Sender):
+        """`req`를 구독하고 데이터를 `sender`로 받는다. 블록을 벗어나면 구독을 끊는다."""
+        sub = self._create_subscription(req, sender)
         try:
-            yield stage
+            yield sub
         finally:
-            await stage.detach()
+            await sub.detach()
 
-    def request(self, req: BaseReqModel, symbols: set[str]):
-        return aclosing(self._gen_req(req, symbols))
+    def stream(self, req: BaseRequest, symbols: set[str]):
+        """`req`를 `symbols`로 구독해 데이터를 흘려주는 async generator."""
+        return aclosing(self._stream_impl(req, symbols))
 
     async def start(self):
-        return await self._tmg.start()
+        return await self._tasks.start()
 
     async def wait(self):
-        return await self._tmg.wait()
+        return await self._tasks.wait()
 
     async def stop(self):
-        return await self._tmg.stop()
+        return await self._tasks.stop()
 
-    def get_origin_stage(self, content_id: str):
-        return self._origin_stage_dict[content_id]
+    def get_shared_symbols(self, content_id: str) -> set[str]:
+        """content_id로 공유 중인 스테이지의 구독 심볼 합집합. 공유 중이 아니면 빈 집합이다."""
+        stage = self._shared_stages.get(content_id)
+        if stage is None:
+            return set()
+        return set(stage.router.symbols)
 
-    async def _ensure_require_stage(
-        self, req: BaseReqModel, sender: Sender[DataModel], symbols: set[str]
+    async def _ensure_upstream_stage(
+        self, upstream: BaseRequest, sender: Sender[DataModel], symbols: set[str]
     ):
-        content_id = req.get_tr_content_id()
-        stage = self._origin_stage_dict.get(content_id)
+        content_id = upstream.tr_content_id
+        stage = self._shared_stages.get(content_id)
         if stage is None:
             if not symbols:
                 return
-            if is_generate_model(req):
-                stage = self._define_origin_gen_stage(req)
-            elif is_dependent_model(req):
-                stage = self._define_origin_dep_stage(req)
+            if is_source(upstream):
+                stage = self._get_or_create_source_stage(upstream)
+            elif is_derived(upstream):
+                stage = self._get_or_create_derived_stage(upstream)
             else:
                 raise DomainError(
-                    "필요한 `Request Model`은 `GenerateModel` 이거나 `DependentModel` 이어야 한다."
+                    "상위 요청은 `SourceRequest` 이거나 `DerivedRequest` 이어야 한다."
                 )
         await stage.update(sender, symbols)
 
-    def _define_gen_stage(self, req: BaseReqModel, output: Sender):
-        stage = Stage(
+    def _create_source_subscription(self, req: BaseRequest, sender: Sender):
+        sub = Subscription(
             _STAGE_CREATION_KEY,
-            id=self._generate_id(req),
+            id=self._next_stage_id(req),
             request=req,
-            output=output,
+            sender=sender,
         )
 
         async def update(symbols: set[str]):
-            origin_stage = self._define_origin_gen_stage(req)
-            await origin_stage.update(output, symbols)
+            stage = self._get_or_create_source_stage(req)
+            await stage.update(sender, symbols)
 
         async def detach():
-            content_id = stage.req_model.get_tr_content_id()
-            origin = self._origin_stage_dict.get(content_id)
-            if origin:
-                await origin.update(stage.output, set())
-            stage.update = detached_update
-            stage.detach = detached_detach
+            stage = self._shared_stages.get(sub.request.tr_content_id)
+            if stage:
+                await stage.update(sub.sender, set())
+            _mark_detached(sub)
 
-        async def detached_update(symbols: set[str]):
-            raise DomainError("이미 `detach`되었다.")
+        sub.update = update
+        sub.detach = detach
+        return sub
 
-        async def detached_detach():
-            raise DomainError("이미 `detach`되었다.")
-
-        stage.update = update
-        stage.detach = detach
-        return stage
-
-    def _define_origin_gen_stage(self, req: BaseReqModel):
-        id = self._generate_id(req)
-        content_id = req.get_tr_content_id()
-        if origin_stage := self._origin_stage_dict.get(content_id):
-            return origin_stage
-        model_id = get_model_id(req)
-        bind_pack = self._get_bind_pack(model_id)
+    def _get_or_create_source_stage(self, req: BaseRequest):
+        stage_id = self._next_stage_id(req)
+        content_id = req.tr_content_id
+        if stage := self._shared_stages.get(content_id):
+            return stage
+        bind_pack = self._get_bind_pack(get_model_id(req))
         ctx = bind_pack.get_init_cb()(req)
-        stage = OriginStage(
+        stage = SharedStage(
             _STAGE_CREATION_KEY,
-            id=id,
+            id=stage_id,
             request=req,
         )
-        shared_sender = stage.output
+        router = stage.router
         gen: AsyncGenerator[DataModel] | None = None
         update_lock = Lock()
         active_symbols: set[str] | None = None
-        binded_cb = bind_pack.get_generate_cb(req)
-        if binded_cb is None:
-            raise StageError(f"'generator_cb'가 'bind'되지 않았다. - {get_model_id(req)}")
+        source_cb = bind_pack.get_source_cb(req)
+        if source_cb is None:
+            raise StageError(f"'source_cb'가 'bind'되지 않았다. - {get_model_id(req)}")
 
         async def update(sender: Sender, symbols: set[str]):
             nonlocal active_symbols, gen
             async with update_lock:
-                shared_sender.set_sender(sender, symbols)
-                current_symbols = shared_sender.symbols
+                router.replace(sender, symbols)
+                current_symbols = router.symbols
                 if current_symbols == active_symbols:
                     return
                 if gen:
-                    await self._cancel_by_name(id)
+                    await self._cancel_by_name(stage_id)
                     await gen.aclose()
                     gen = None
                 # 업데이트 심볼이 없다면 자원 정리한다.
                 if not current_symbols:
-                    self._origin_stage_dict.pop(content_id, None)
-                    if bind_pack._detach_cb:
-                        await bind_pack._detach_cb(ctx)
+                    self._shared_stages.pop(content_id, None)
+                    if detach_cb := bind_pack.get_detach_cb():
+                        await detach_cb(ctx)
                     active_symbols = current_symbols
                     return
-                symbol_set = set(current_symbols)
-                gen = binded_cb(ctx, symbol_set)
+                gen = source_cb(ctx, set(current_symbols))
 
-                async def _(gen: AsyncGenerator[DataModel]):
+                async def _pump(gen: AsyncGenerator[DataModel]):
                     async for data in gen:
-                        await shared_sender(data)
+                        await router(data)
 
-                await self._submit(_(gen), id)
+                await self._submit(_pump(gen), stage_id)
                 active_symbols = current_symbols
 
         stage.update = update
-        self._origin_stage_dict[content_id] = stage
+        self._shared_stages[content_id] = stage
         return stage
 
-    def _define_dep_stage(self, req: BaseReqModel, output: Sender):
-        stage = Stage(
+    def _create_derived_subscription(self, req: BaseRequest, sender: Sender):
+        sub = Subscription(
             _STAGE_CREATION_KEY,
-            id=self._generate_id(req),
+            id=self._next_stage_id(req),
             request=req,
-            output=output,
+            sender=sender,
         )
 
         async def update(symbols: set[str]):
-            origin_stage = self._define_origin_dep_stage(req)
-            await origin_stage.update(output, symbols)
+            stage = self._get_or_create_derived_stage(req)
+            await stage.update(sender, symbols)
 
         async def detach():
-            content_id = stage.req_model.get_tr_content_id()
-            origin = self._origin_stage_dict.get(content_id)
-            if origin:
-                await origin.update(stage.output, set())
-            stage.update = detached_update
-            stage.detach = detached_detach
+            stage = self._shared_stages.get(sub.request.tr_content_id)
+            if stage:
+                await stage.update(sub.sender, set())
+            _mark_detached(sub)
 
-        async def detached_update(symbols: set[str]):
-            raise DomainError("이미 `detach`되었다.")
+        sub.update = update
+        sub.detach = detach
+        return sub
 
-        async def detached_detach():
-            raise DomainError("이미 `detach`되었다.")
-
-        stage.update = update
-        stage.detach = detach
-        return stage
-
-    def _define_origin_dep_stage(self, req: BaseReqModel):
-        id = self._generate_id(req)
-        content_id = req.get_tr_content_id()
-        if origin_stage := self._origin_stage_dict.get(content_id):
-            return origin_stage
-        model_id = get_model_id(req)
-        bind_pack = self._get_bind_pack(model_id)
+    def _get_or_create_derived_stage(self, req: BaseRequest):
+        stage_id = self._next_stage_id(req)
+        content_id = req.tr_content_id
+        if stage := self._shared_stages.get(content_id):
+            return stage
+        bind_pack = self._get_bind_pack(get_model_id(req))
         ctx = bind_pack.get_init_cb()(req)
-        stage = OriginStage(
+        stage = SharedStage(
             _STAGE_CREATION_KEY,
-            id=id,
+            id=stage_id,
             request=req,
         )
-        shared_sender = stage.output
+        router = stage.router
         gen: AsyncGenerator[DataModel] | None = None
-        transq = TransmitQueue[DataModel]()
+        channel = Channel[DataModel]()
         update_lock = Lock()
         active_symbols: set[str] | None = None
 
-        if not isinstance(req, DependentModel):
-            raise StageError(f"'DependentModel'이어야 한다. - {get_model_id(req)}")
-        binded_cb = bind_pack.get_dependent_cb(req)
-        if binded_cb is None:
-            raise StageError(f"'dependent_cb'가 'bind'되지 않았다. - {get_model_id(req)}")
+        if not isinstance(req, DerivedRequest):
+            raise StageError(f"'DerivedRequest'이어야 한다. - {get_model_id(req)}")
+        derived_cb = bind_pack.get_derived_cb(req)
+        if derived_cb is None:
+            raise StageError(f"'derived_cb'가 'bind'되지 않았다. - {get_model_id(req)}")
 
         async def update(sender: Sender, symbols: set[str]):
             nonlocal active_symbols, gen
             async with update_lock:
-                shared_sender.set_sender(sender, symbols)
-                current_symbols = shared_sender.symbols
+                router.replace(sender, symbols)
+                current_symbols = router.symbols
                 if current_symbols == active_symbols:
                     return
                 # 상위에 등록하는 심볼도 이 스테이지의 합집합이어야 한다. 이번
-                # update의 symbols만 넘기면 같은 transq의 이전 등록을 덮어써
+                # update의 symbols만 넘기면 같은 channel의 이전 등록을 덮어써
                 # 먼저 구독한 쪽이 상위에서 사라진다.
-                require, req_symbols = req.get_tr_require_with_symbol(current_symbols)
+                upstream, upstream_symbols = req.resolve_upstream(current_symbols)
                 if gen:
-                    await self._cancel_by_name(id)
+                    await self._cancel_by_name(stage_id)
                     await gen.aclose()
                     gen = None
                 # 업데이트 심볼이 없다면 자원 정리한다.
                 if not current_symbols:
-                    await self._ensure_require_stage(require, transq, set())
-                    self._origin_stage_dict.pop(content_id, None)
-                    if bind_pack._detach_cb:
-                        await bind_pack._detach_cb(ctx)
+                    await self._ensure_upstream_stage(upstream, channel, set())
+                    self._shared_stages.pop(content_id, None)
+                    if detach_cb := bind_pack.get_detach_cb():
+                        await detach_cb(ctx)
                     active_symbols = current_symbols
                     return
-                await self._ensure_require_stage(require, transq, req_symbols)
-                symbol_set = set(current_symbols)
-                gen = binded_cb(ctx, symbol_set, transq.recv)
+                await self._ensure_upstream_stage(upstream, channel, upstream_symbols)
+                gen = derived_cb(ctx, set(current_symbols), channel.recv)
 
-                async def _(gen: AsyncGenerator[DataModel]):
+                async def _pump(gen: AsyncGenerator[DataModel]):
                     async for data in gen:
-                        await shared_sender(data)
+                        await router(data)
 
-                await self._submit(_(gen), id)
+                await self._submit(_pump(gen), stage_id)
                 active_symbols = current_symbols
 
         stage.update = update
-        self._origin_stage_dict[content_id] = stage
+        self._shared_stages[content_id] = stage
         return stage
 
-    def _define_inst_stage(self, req: BaseReqModel, output: Sender):
-        id = self._generate_id(req)
-        stage = Stage(
+    def _create_session_subscription(self, req: BaseRequest, sender: Sender):
+        stage_id = self._next_stage_id(req)
+        sub = Subscription(
             _STAGE_CREATION_KEY,
-            id=id,
+            id=stage_id,
             request=req,
-            output=output,
+            sender=sender,
         )
         model_id = get_model_id(req)
         bind_pack = self._get_bind_pack(model_id)
         bind_cb = bind_pack.get_bind_cb()
         unbind_cb = bind_pack.get_unbind_cb()
         detach_cb = bind_pack.get_detach_cb()
-        req_cb = bind_pack.get_require_cb()
+        always_cb = bind_pack.get_always_cb()
         if bind_cb is None:
             raise DomainError(f"`@bind`는 바인드 되어야 한다. - {model_id}")
         ctx = bind_pack.get_init_cb()(req)
-        transq_dict: dict[str, TransmitQueue[tuple[DataModel, Sequence]]] = {}
-        seq_sender_dict: dict[str, set[SequenceSender]] = {}
-        router_set: SendRouterSet = SendRouterSet()
-        active_stage_set: set[Stage] = set()
+        slot_channels: dict[str, Channel[tuple[DataModel, Pipeline]]] = {}
+        slot_senders: dict[str, set[PipelineSender]] = {}
+        upstream_routers = UpstreamRouters()
+        upstream_subs: set[Subscription] = set()
         update_lock = Lock()
+
+        async def open_slot(slot: str, pipelines: AsyncGenerator[Pipeline]) -> None:
+            """슬롯 채널을 열고 파이프라인마다 센더를 만든 뒤 슬롯 태스크를 띄운다."""
+
+            channel = Channel[tuple[DataModel, Pipeline]]()
+            slot_channels[slot] = channel
+            senders: set[PipelineSender] = set()
+            async for pipeline in pipelines:
+                senders.add(PipelineSender(channel, pipeline))
+            slot_senders[slot] = senders
+            await self._submit(self._run_pipeline_slot(channel.recv, sender), f"{stage_id}:{slot}")
 
         async def close_slots(target: set[str]) -> None:
             """슬롯을 닫고 슬롯 태스크가 끝나 이름을 놓을 때까지 기다린다.
 
-            큐만 닫으면 태스크가 전송(`output`)에 묶여 있는 동안 `{id}:{symbol}` 이름이
+            큐만 닫으면 태스크가 전송(`sender`)에 묶여 있는 동안 `{stage_id}:{symbol}` 이름이
             점유된 채 남아, 같은 심볼을 곧바로 다시 열 때 이름 충돌이 난다.
             """
 
-            for s in target:
-                transq_dict.pop(s).shutdown()
-                seq_sender_dict.pop(s)
+            for slot in target:
+                slot_channels.pop(slot).shutdown()
+                slot_senders.pop(slot)
             async with TaskGroup() as tg:
-                for s in target:
-                    tg.create_task(self._cancel_by_name(f"{id}:{s}"))
+                for slot in target:
+                    tg.create_task(self._cancel_by_name(f"{stage_id}:{slot}"))
 
         async def unbind_symbols(target: set[str]) -> None:
             """슬롯을 닫고 심볼별 정리 콜백을 부른다. `update()`와 `detach()`가 함께 쓴다.
@@ -475,156 +363,118 @@ class Domain:
             await close_slots(target)
             if unbind_cb:
                 async with TaskGroup() as tg:
-                    for s in target:
-                        tg.create_task(unbind_cb(ctx, s))
+                    for symbol in target:
+                        tg.create_task(unbind_cb(ctx, symbol))
 
         async def update(symbols: set[str]):
-            nonlocal req_cb, active_stage_set
+            nonlocal always_cb, upstream_subs
             async with update_lock:
-                active_symbols: set[str] = set(transq_dict.keys())
-                current_symbols: set[str] = symbols | {"__require__"}
+                active_symbols: set[str] = set(slot_channels.keys())
+                current_symbols: set[str] = symbols | {_ALWAYS_SLOT}
                 await unbind_symbols(active_symbols - current_symbols)
-                if req_cb:
-                    transq = TransmitQueue[tuple[DataModel, Sequence]]()
-                    transq_dict["__require__"] = transq
-                    seq_sender_set: set[SequenceSender] = set()
-                    async for seq in req_cb(ctx):
-                        seq_sender_set.add(SequenceSender(transq, seq))
-                    seq_sender_dict["__require__"] = seq_sender_set
-                    await self._submit(
-                        self._task_sequence(
-                            transq.recv,
-                            output,
-                        ),
-                        f"{id}:__require__",
-                    )
-                    req_cb = None
+                if always_cb:
+                    await open_slot(_ALWAYS_SLOT, always_cb(ctx))
+                    always_cb = None
                 # `current_symbols`는 센티널을 지우지 않으려고 만든 것이라 여기에
-                # 쓰면 안 된다. `"__require__"` 슬롯은 위 `req_cb` 분기만 만든다.
-                new_symbols = symbols - active_symbols
-                if new_symbols:
-                    for symbol in new_symbols:
-                        transq = TransmitQueue[tuple[DataModel, Sequence]]()
-                        transq_dict[symbol] = transq
-                        seq_sender_set: set[SequenceSender] = set()
-                        async for seq in bind_cb(ctx, symbol):
-                            seq_sender_set.add(SequenceSender(transq, seq))
-                        seq_sender_dict[symbol] = seq_sender_set
-                        await self._submit(
-                            self._task_sequence(
-                                transq.recv,
-                                output,
-                            ),
-                            f"{id}:{symbol}",
+                # 쓰면 안 된다. `_ALWAYS_SLOT` 슬롯은 위 `always_cb` 분기만 만든다.
+                for symbol in symbols - active_symbols:
+                    await open_slot(symbol, bind_cb(ctx, symbol))
+                upstream_routers.clear()
+                for senders in slot_senders.values():
+                    for pipeline_sender in senders:
+                        upstream_routers.add_sender(
+                            pipeline_sender.pipeline.upstream, pipeline_sender
                         )
-                router_set.clear()
-                for sss in seq_sender_dict.values():
-                    for ss in sss:
-                        router_set.add_sender(ss.sequence.require, ss)
-                current_stage_set: set[Stage] = set()
-                updating: list[tuple[Stage, set[str]]] = []
-                # 어떤 시퀀스도 쓰지 않게 된 상위는 여기서 빠져 `current_stage_set`에 들지 않고
+                current_subs: set[Subscription] = set()
+                updating: list[tuple[Subscription, set[str]]] = []
+                # 어떤 파이프라인도 쓰지 않게 된 상위는 여기서 빠져 `current_subs`에 들지 않고
                 # 아래에서 떼어진다. 남겨 두면 매 갱신마다 빈 집합으로 `update()`되어, 원천이
                 # 이미 사라진 상위가 그때마다 새로 만들어졌다(init) 곧바로 정리된다.
-                router_set.prune()
-                for reg in router_set():
-                    req_stage: Stage | None = None
-                    for act in active_stage_set:
-                        if act.req_model.get_tr_content_id() == reg.require.get_tr_content_id():
-                            if act.output != reg.router:
+                upstream_routers.prune()
+                for route in upstream_routers:
+                    upstream_sub: Subscription | None = None
+                    for active in upstream_subs:
+                        if active.request.tr_content_id == route.upstream.tr_content_id:
+                            if active.sender != route.router:
                                 raise DomainError(
                                     "불변 조건의 오류: 두 `Sender`는 같은 객체여야 한다."
                                 )
-                            req_stage = act
+                            upstream_sub = active
                             break
-                    if req_stage is None:
-                        req_stage = self._define_stage(reg.require, reg.router)
-                    current_stage_set.add(req_stage)
-                    # 상위에 등록할 심볼은 시퀀스가 요구한 상위 표기(`seq.symbol`)다.
-                    # 이 스테이지가 받은 하위 심볼이 아니다.
-                    updating.append((req_stage, reg.router.symbols))
-                detaching_stage_set = active_stage_set - current_stage_set
+                    if upstream_sub is None:
+                        upstream_sub = self._create_subscription(route.upstream, route.router)
+                    current_subs.add(upstream_sub)
+                    # 상위에 등록할 심볼은 파이프라인이 요구한 상위 표기(`upstream_symbol`)다.
+                    # 이 구독이 받은 하위 심볼이 아니다.
+                    updating.append((upstream_sub, route.router.symbols))
                 async with TaskGroup() as tg:
-                    for detaching in detaching_stage_set:
+                    for detaching in upstream_subs - current_subs:
                         tg.create_task(detaching.detach())
                 async with TaskGroup() as tg:
-                    for req_stage, req_symbols in updating:
-                        tg.create_task(req_stage.update(req_symbols))
-                active_stage_set = current_stage_set
+                    for upstream_sub, upstream_symbols in updating:
+                        tg.create_task(upstream_sub.update(upstream_symbols))
+                upstream_subs = current_subs
 
         async def detach():
-            # `bind_cb`로 연 슬롯은 모두 짝을 맞춰 닫는다. `"__require__"`는 `req_cb`가
+            # `bind_cb`로 연 슬롯은 모두 짝을 맞춰 닫는다. `_ALWAYS_SLOT`은 `always_cb`가
             # 만든 슬롯이라 bind된 적이 없으므로 제외한다.
-            await unbind_symbols(set(transq_dict) - {"__require__"})
-            await close_slots(set(transq_dict))  # 남은 것은 `"__require__"` 슬롯뿐이다
+            await unbind_symbols(set(slot_channels) - {_ALWAYS_SLOT})
+            await close_slots(set(slot_channels))  # 남은 것은 `_ALWAYS_SLOT` 슬롯뿐이다
             async with TaskGroup() as tg:
-                for req_stage in active_stage_set:
-                    tg.create_task(req_stage.detach())
+                for upstream_sub in upstream_subs:
+                    tg.create_task(upstream_sub.detach())
             if detach_cb:
                 await detach_cb(ctx)
-            stage.update = detached_update
-            stage.detach = detached_detach
+            _mark_detached(sub)
 
-        async def detached_update(symbols: set[str]):
-            raise DomainError("이미 `detach`되었다.")
+        sub.update = update
+        sub.detach = detach
+        return sub
 
-        async def detached_detach():
-            raise DomainError("이미 `detach`되었다.")
-
-        stage.update = update
-        stage.detach = detach
-        return stage
-
-    def _define_stage(self, req: BaseReqModel, output: Sender):
-        if is_generate_model(req):
-            return self._define_gen_stage(req, output)
-        if is_dependent_model(req):
-            return self._define_dep_stage(req, output)
-        if is_instant_model(req):
-            return self._define_inst_stage(req, output)
+    def _create_subscription(self, req: BaseRequest, sender: Sender):
+        if is_source(req):
+            return self._create_source_subscription(req, sender)
+        if is_derived(req):
+            return self._create_derived_subscription(req, sender)
+        if is_session(req):
+            return self._create_session_subscription(req, sender)
         raise DomainError(
-            f"지원 되는 `RequestModel`이 아니거나 등록된 `Model`이 아니다. - {get_model_type(req)}"
+            f"지원 되는 요청이 아니거나 등록된 요청이 아니다. - {get_model_type(req)}"
         )
 
-    async def _task_sequence(
-        self, recv: Receiver[tuple[DataModel, Sequence]], sender: Sender[DataModel]
+    async def _run_pipeline_slot(
+        self, recv: Receiver[tuple[DataModel, Pipeline]], sender: Sender[DataModel]
     ):
         while True:
             try:
-                data, seq = await recv()
-            except ClosedConnection:
+                data, pipeline = await recv()
+            except ChannelClosed:
                 break
-            out_data = await seq.invoke(data)
+            out_data = await pipeline.invoke(data)
             if out_data:
                 if not out_data.get_tr_req_content_id():
-                    out_data._tr_req_content_id = seq.require.get_tr_content_id()
+                    out_data._tr_req_content_id = pipeline.upstream.tr_content_id
                 await sender(out_data)
 
-    async def _gen_req(self, req: BaseReqModel, symbols: set[str]):
-        q = TransmitQueue()
-        async with self.stage(req, q) as stage:
-            await stage.update(symbols)
+    async def _stream_impl(self, req: BaseRequest, symbols: set[str]):
+        channel = Channel()
+        async with self.subscribe(req, channel) as sub:
+            await sub.update(symbols)
             while True:
-                yield await q.recv()
+                yield await channel.recv()
 
     async def _submit(self, coro: Coroutine[Any, Any, None], name: str):
-        return await self._tmg.submit(coro, name)
+        return await self._tasks.submit(coro, name)
 
     async def _cancel_by_name(self, name: str) -> bool:
-        return await self._tmg.cancel_by_name(name)
+        return await self._tasks.cancel_by_name(name)
 
-    async def _close_stage(self, stage: Stage):
-        content_id = stage.req_model.get_tr_content_id()
-        origin = self._origin_stage_dict.get(content_id)
-        if origin:
-            await origin.update(stage.output, set())
-
-    def _generate_id(self, req: BaseReqModel):
-        self._count += 1
-        return f"{get_model_id(req)}:{self._count}"
+    def _next_stage_id(self, req: BaseRequest):
+        self._stage_seq += 1
+        return f"{get_model_id(req)}:{self._stage_seq}"
 
     def _get_bind_pack(self, model_id: str) -> BindPack:
-        bind_pack = BindPack.get_binder(model_id)
+        bind_pack = BindPack.lookup(model_id)
         if bind_pack is None:
-            raise DomainError(f"요청한 'RequestModel'의 'Binder'를 찾을 수 없다. - {model_id}")
+            raise DomainError(f"요청한 모델의 'Binder'를 찾을 수 없다. - {model_id}")
         return bind_pack

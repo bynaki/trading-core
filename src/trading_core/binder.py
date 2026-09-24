@@ -1,72 +1,72 @@
 from collections.abc import AsyncGenerator, Callable, Coroutine
 from contextlib import aclosing
 from inspect import signature
-from typing import Any, Protocol, get_type_hints, overload
+from typing import Any, get_type_hints, overload
 
 from trading_core.exceptions import BindError
 from trading_core.model import (
-    BaseReqModel,
+    BaseRequest,
     DataModel,
-    DependentModel,
-    GenerateModel,
+    DerivedRequest,
+    Pipeline,
     Receiver,
-    RequestModel,
-    Sequence,
+    SessionRequest,
+    SourceRequest,
     get_model_id,
 )
 
-type InitCb[Tctx, Treq: BaseReqModel] = Callable[[Treq], Tctx]
-type GenerateCb[Tctx] = Callable[[Tctx, set[str]], AsyncGenerator[DataModel]]
-type DependentCb[Tctx] = Callable[[Tctx, set[str], Receiver], AsyncGenerator[DataModel]]
+type InitCb[Tctx, Treq: BaseRequest] = Callable[[Treq], Tctx]
+type SourceCb[Tctx] = Callable[[Tctx, set[str]], AsyncGenerator[DataModel]]
+type DerivedCb[Tctx] = Callable[[Tctx, set[str], Receiver], AsyncGenerator[DataModel]]
 type DetachCb[Tctx] = Callable[[Tctx], Coroutine[Any, Any, None]]
-type BindCb[Tctx] = Callable[[Tctx, str], AsyncGenerator[Sequence]]
+type BindCb[Tctx] = Callable[[Tctx, str], AsyncGenerator[Pipeline]]
 type UnbindCb[Tctx] = Callable[[Tctx, str], Coroutine[Any, Any, None]]
-type RequireCb[Tctx] = Callable[[Tctx], AsyncGenerator[Sequence]]
+type AlwaysCb[Tctx] = Callable[[Tctx], AsyncGenerator[Pipeline]]
 
 
-class BindPack[Tctx, Treq: BaseReqModel]:
-    _binder_dict: dict[str, BindPack] = {}
+class BindPack[Tctx, Treq: BaseRequest]:
+    _registry: dict[str, BindPack] = {}
 
-    def __init__(self, request_t: type[Treq], init_cb: InitCb[Tctx, Treq]) -> None:
-        model_id = get_model_id(request_t)
-        if self._binder_dict.get(model_id):
+    def __init__(self, request_type: type[Treq], init_cb: InitCb[Tctx, Treq]) -> None:
+        model_id = get_model_id(request_type)
+        if self._registry.get(model_id):
             raise BindError(f"이미 'binder'가 있다. - {model_id}")
-        self._binder_dict[model_id] = self
-        self._request_t: type[Treq] = request_t
+        self._registry[model_id] = self
+        self._request_type: type[Treq] = request_type
         self._init_cb: InitCb[Tctx, Treq] = init_cb
-        self._generate_cb: GenerateCb[Tctx] | None = None
-        self._dependent_cb: DependentCb[Tctx] | None = None
+        self._source_cb: SourceCb[Tctx] | None = None
+        self._derived_cb: DerivedCb[Tctx] | None = None
         self._bind_cb: BindCb[Tctx] | None = None
         self._unbind_cb: UnbindCb[Tctx] | None = None
-        self._require_cb: RequireCb[Tctx] | None = None
+        self._always_cb: AlwaysCb[Tctx] | None = None
         self._detach_cb: DetachCb[Tctx] | None = None
 
     @classmethod
-    def get_binder(cls, model_id: str):
-        return cls._binder_dict.get(model_id)
+    def lookup(cls, model_id: str) -> BindPack | None:
+        return cls._registry.get(model_id)
 
     @property
-    def request_t(self) -> type[Treq]:
-        return self._request_t
+    def request_type(self) -> type[Treq]:
+        return self._request_type
 
     def get_init_cb(self) -> InitCb[Tctx, Treq]:
         return self._init_cb
 
-    def set_generate_cb(self, cb: GenerateCb[Tctx]):
-        if not issubclass(self._request_t, GenerateModel):
-            raise BindError("'GenerateModel'이 아니다.")
-        if self._request_t._tr_model_type != "unregistered":
+    def set_source_cb(self, cb: SourceCb[Tctx]):
+        if not issubclass(self._request_type, SourceRequest):
+            raise BindError("'SourceRequest'가 아니다.")
+        if self._request_type._tr_model_type != "unregistered":
             raise BindError(
-                f"같은 'GenerateModel' 이미 등록되어 있다 - ({get_model_id(self._request_t)})"
+                f"같은 'SourceRequest'가 이미 등록되어 있다 - ({get_model_id(self._request_type)})"
             )
-        self._request_t._tr_model_type = "generator"
-        self._generate_cb = cb
+        self._request_type._tr_model_type = "source"
+        self._source_cb = cb
 
-    def get_generate_cb(self, req: BaseReqModel) -> GenerateCb[Tctx] | None:
-        cb = self._generate_cb
+    def get_source_cb(self, req: BaseRequest) -> SourceCb[Tctx] | None:
+        cb = self._source_cb
         if cb is None:
             return None
-        req_content_id = req.get_tr_content_id()
+        req_content_id = req.tr_content_id
 
         async def wrap(ctx: Tctx, symbols: set[str]):
             async with aclosing(cb(ctx, symbols)) as agen:
@@ -76,21 +76,21 @@ class BindPack[Tctx, Treq: BaseReqModel]:
 
         return wrap
 
-    def set_dependent_cb(self, cb: DependentCb[Tctx]):
-        if not issubclass(self._request_t, DependentModel):
-            raise BindError(f"'DependentModel'이 아니다. - {get_model_id(self._request_t)}")
-        if self._request_t._tr_model_type != "unregistered":
+    def set_derived_cb(self, cb: DerivedCb[Tctx]):
+        if not issubclass(self._request_type, DerivedRequest):
+            raise BindError(f"'DerivedRequest'가 아니다. - {get_model_id(self._request_type)}")
+        if self._request_type._tr_model_type != "unregistered":
             raise BindError(
-                f"같은 'DependentModel' 이미 등록되어 있다 - ({get_model_id(self._request_t)})"
+                f"같은 'DerivedRequest'가 이미 등록되어 있다 - ({get_model_id(self._request_type)})"
             )
-        self._request_t._tr_model_type = "dependent_generator"
-        self._dependent_cb = cb
+        self._request_type._tr_model_type = "derived"
+        self._derived_cb = cb
 
-    def get_dependent_cb(self, req: BaseReqModel) -> DependentCb[Tctx] | None:
-        if self._dependent_cb is None:
+    def get_derived_cb(self, req: BaseRequest) -> DerivedCb[Tctx] | None:
+        if self._derived_cb is None:
             return None
-        cb = self._dependent_cb
-        req_content_id = req.get_tr_content_id()
+        cb = self._derived_cb
+        req_content_id = req.tr_content_id
 
         async def wrap(ctx: Tctx, symbols: set[str], recv: Receiver) -> AsyncGenerator[DataModel]:
             async with aclosing(cb(ctx, symbols, recv)) as agen:
@@ -101,37 +101,37 @@ class BindPack[Tctx, Treq: BaseReqModel]:
         return wrap
 
     def set_bind_cb(self, cb: BindCb[Tctx]):
-        if not issubclass(self._request_t, RequestModel):
-            raise BindError(f"'RequestModel'이 아니다. - {get_model_id(self._request_t)}")
-        if self._request_t._tr_model_type != "unregistered":
+        if not issubclass(self._request_type, SessionRequest):
+            raise BindError(f"'SessionRequest'가 아니다. - {get_model_id(self._request_type)}")
+        if self._request_type._tr_model_type != "unregistered":
             raise BindError(
-                f"같은 'RequestModel' 이미 등록되어 있다 - ({get_model_id(self._request_t)})"
+                f"같은 'SessionRequest'가 이미 등록되어 있다 - ({get_model_id(self._request_type)})"
             )
-        self._request_t._tr_model_type = "instanter"
+        self._request_type._tr_model_type = "session"
         self._bind_cb = cb
 
     def get_bind_cb(self) -> BindCb[Tctx] | None:
         return self._bind_cb
 
     def set_unbind_cb(self, cb: UnbindCb[Tctx]):
-        if not issubclass(self._request_t, RequestModel):
-            raise BindError(f"'RequestModel'이 아니다. - {get_model_id(self._request_t)}")
+        if not issubclass(self._request_type, SessionRequest):
+            raise BindError(f"'SessionRequest'가 아니다. - {get_model_id(self._request_type)}")
         if self._unbind_cb is not None:
-            raise BindError(f"'unbind'가 이미 바인드 되었다. - {get_model_id(self._request_t)}")
+            raise BindError(f"'unbind'가 이미 바인드 되었다. - {get_model_id(self._request_type)}")
         self._unbind_cb = cb
 
     def get_unbind_cb(self) -> UnbindCb[Tctx] | None:
         return self._unbind_cb
 
-    def set_require_cb(self, cb: RequireCb[Tctx]):
-        if not issubclass(self._request_t, RequestModel):
-            raise BindError(f"'RequestModel'이 아니다. - {get_model_id(self._request_t)}")
-        if self._require_cb is not None:
-            raise BindError(f"'require'가 이미 바인드 되었다. - {get_model_id(self._request_t)}")
-        self._require_cb = cb
+    def set_always_cb(self, cb: AlwaysCb[Tctx]):
+        if not issubclass(self._request_type, SessionRequest):
+            raise BindError(f"'SessionRequest'가 아니다. - {get_model_id(self._request_type)}")
+        if self._always_cb is not None:
+            raise BindError(f"'always'가 이미 바인드 되었다. - {get_model_id(self._request_type)}")
+        self._always_cb = cb
 
-    def get_require_cb(self) -> RequireCb[Tctx] | None:
-        return self._require_cb
+    def get_always_cb(self) -> AlwaysCb[Tctx] | None:
+        return self._always_cb
 
     def set_detach_cb(self, cb: DetachCb[Tctx]):
         self._detach_cb = cb
@@ -140,7 +140,7 @@ class BindPack[Tctx, Treq: BaseReqModel]:
         return self._detach_cb
 
 
-class BaseBinder[Tctx, Treq: BaseReqModel]:
+class BaseBinder[Tctx, Treq: BaseRequest]:
     def __init__(self, pack: BindPack[Tctx, Treq]):
         self._pack = pack
 
@@ -149,72 +149,61 @@ class BaseBinder[Tctx, Treq: BaseReqModel]:
         return cb
 
 
-class GenerateModelBinder[Tctx, Treq: GenerateModel](BaseBinder[Tctx, Treq]):
-    def __call__(self, cb: GenerateCb[Tctx]) -> GenerateModelBinder:
+class SourceBinder[Tctx, Treq: SourceRequest](BaseBinder[Tctx, Treq]):
+    def __call__(self, cb: SourceCb[Tctx]) -> SourceBinder:
         return self.generate(cb)
 
-    def generate(self, cb: GenerateCb[Tctx]):
-        self._pack.set_generate_cb(cb)
+    def generate(self, cb: SourceCb[Tctx]):
+        self._pack.set_source_cb(cb)
         return self
 
 
-class DependentModelBinder[Tctx, Treq: DependentModel](BaseBinder[Tctx, Treq]):
-    def __call__(self, cb: DependentCb[Tctx]) -> DependentModelBinder:
+class DerivedBinder[Tctx, Treq: DerivedRequest](BaseBinder[Tctx, Treq]):
+    def __call__(self, cb: DerivedCb[Tctx]) -> DerivedBinder:
         return self.generate(cb)
 
-    def generate(self, cb: DependentCb[Tctx]):
-        self._pack.set_dependent_cb(cb)
+    def generate(self, cb: DerivedCb[Tctx]):
+        self._pack.set_derived_cb(cb)
         return self
 
 
-class RequestModelBinder[Tctx, Treq: RequestModel](BaseBinder[Tctx, Treq]):
-    def __call__(self, cb: BindCb[Tctx]) -> RequestModelBinder:
+class SessionBinder[Tctx, Treq: SessionRequest](BaseBinder[Tctx, Treq]):
+    def __call__(self, cb: BindCb[Tctx]) -> SessionBinder:
         return self.bind(cb)
 
-    def bind(self, cb: BindCb[Tctx]) -> RequestModelBinder[Tctx, Treq]:
+    def bind(self, cb: BindCb[Tctx]) -> SessionBinder[Tctx, Treq]:
         self._pack.set_bind_cb(cb)
         return self
 
-    def unbind(self, cb: UnbindCb[Tctx]) -> RequestModelBinder[Tctx, Treq]:
+    def unbind(self, cb: UnbindCb[Tctx]) -> SessionBinder[Tctx, Treq]:
         self._pack.set_unbind_cb(cb)
         return self
 
-    def require(self, cb: RequireCb[Tctx]) -> RequestModelBinder[Tctx, Treq]:
-        self._pack.set_require_cb(cb)
+    def always(self, cb: AlwaysCb[Tctx]) -> SessionBinder[Tctx, Treq]:
+        """구독 심볼과 상관없이 늘 붙는 파이프라인을 등록한다."""
+        self._pack.set_always_cb(cb)
         return self
 
 
-class InitGenWrap[Treq: GenerateModel](Protocol):
-    def __call__[Tctx](self, cb: InitCb[Tctx, Treq]) -> GenerateModelBinder[Tctx, Treq]: ...
-
-
-class InitDependWrap[Treq: DependentModel](Protocol):
-    def __call__[Tctx](self, cb: InitCb[Tctx, Treq]) -> DependentModelBinder[Tctx, Treq]: ...
-
-
-class InitReqWrap[Treq: RequestModel](Protocol):
-    def __call__[Tctx](self, cb: InitCb[Tctx, Treq]) -> RequestModelBinder[Tctx, Treq]: ...
+@overload
+def initialize[Tctx, Treq: SourceRequest](
+    cb: InitCb[Tctx, Treq],
+) -> SourceBinder[Tctx, Treq]: ...
 
 
 @overload
-def initialize[Tctx, Treq: GenerateModel](
+def initialize[Tctx, Treq: DerivedRequest](
     cb: InitCb[Tctx, Treq],
-) -> GenerateModelBinder[Tctx, Treq]: ...
+) -> DerivedBinder[Tctx, Treq]: ...
 
 
 @overload
-def initialize[Tctx, Treq: DependentModel](
+def initialize[Tctx, Treq: SessionRequest](
     cb: InitCb[Tctx, Treq],
-) -> DependentModelBinder[Tctx, Treq]: ...
+) -> SessionBinder[Tctx, Treq]: ...
 
 
-@overload
-def initialize[Tctx, Treq: RequestModel](
-    cb: InitCb[Tctx, Treq],
-) -> RequestModelBinder[Tctx, Treq]: ...
-
-
-def initialize[Tctx, Treq: BaseReqModel](cb: InitCb[Tctx, Treq]) -> object:
+def initialize[Tctx, Treq: BaseRequest](cb: InitCb[Tctx, Treq]) -> object:
     params = list(signature(cb).parameters)
     if not params:
         raise BindError(f"'init' 콜백은 요청 인자가 하나 있어야 한다. - {cb.__qualname__}")
@@ -225,13 +214,13 @@ def initialize[Tctx, Treq: BaseReqModel](cb: InitCb[Tctx, Treq]) -> object:
             f"'init' 콜백의 첫 인자 '{first}'에 요청 타입 어노테이션이 있어야 한다."
             f" - {cb.__qualname__}"
         )
-    req_t = type_hints[first]
-    bind_pack = BindPack(req_t, cb)
-    if issubclass(req_t, GenerateModel):
-        return GenerateModelBinder(bind_pack)
-    elif issubclass(req_t, DependentModel):
-        return DependentModelBinder(bind_pack)
-    elif issubclass(req_t, RequestModel):
-        return RequestModelBinder(bind_pack)
+    request_type = type_hints[first]
+    bind_pack = BindPack(request_type, cb)
+    if issubclass(request_type, SourceRequest):
+        return SourceBinder(bind_pack)
+    elif issubclass(request_type, DerivedRequest):
+        return DerivedBinder(bind_pack)
+    elif issubclass(request_type, SessionRequest):
+        return SessionBinder(bind_pack)
     else:
-        raise BindError(f"지원하는 'RequestModel'이 아니다. - {req_t}")
+        raise BindError(f"지원하는 요청 타입이 아니다. - {request_type}")

@@ -67,7 +67,7 @@ async def run_ex(domain: Domain) -> None:
     log.info("━━━━━━━━━━ 시작: 로그 모듈 쓰기 ━━━━━━━━━━", take=TAKE)
 
     received = 0
-    async with domain.request(PriceFeedReq(base=100.0), {"BTC", "ETH"}) as gen:
+    async with domain.stream(PriceFeedReq(base=100.0), {"BTC", "ETH"}) as gen:
         async for data in gen:
             d = cast_model(data, PriceData)
             log.info("수신", symbol=d.symbol, price=d.price)

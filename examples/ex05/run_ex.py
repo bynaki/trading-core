@@ -1,6 +1,6 @@
 """두 소비자가 같은 파생 요청을 서로 다른 심볼로 동시에 구독하는 ex05 실행 모듈.
 
-`Domain.request()` 대신 저수준 `Domain.stage()`를 쓴다. 구독을 열어 둔 채 다른
+`Domain.stream()` 대신 저수준 `Domain.subscribe()`를 쓴다. 구독을 열어 둔 채 다른
 구독을 붙였다 떼는 시나리오를 그대로 표현할 수 있고, 데이터가 오지 않는 구독자도
 블로킹 없이 관찰할 수 있기 때문이다.
 """
@@ -41,7 +41,7 @@ def set_phase(phase: str) -> None:
 class Recorder:
     """단계별 수신 건수를 세는 `Sender`.
 
-    `Domain.stage()`에 넘기면 파생 스테이지의 `SendRouter`가 이 인스턴스를 구독자로
+    `Domain.subscribe()`에 넘기면 파생 스테이지의 `SymbolRouter`가 이 인스턴스를 구독자로
     등록하고, 구독한 심볼의 데이터만 fan-out한다.
     """
 
@@ -96,14 +96,14 @@ async def run_ex(domain: Domain) -> None:
     recorder_b = Recorder("B")
 
     # 같은 요청(=같은 content_id)이므로 두 구독자는 하나의 파생 스테이지를 공유한다.
-    async with domain.stage(req, recorder_a) as stage_a:
+    async with domain.subscribe(req, recorder_a) as sub_a:
         set_phase(PHASE_1)
-        await stage_a.update({"BTC"})
+        await sub_a.update({"BTC"})
         await asyncio.sleep(2)
 
-        async with domain.stage(req, recorder_b) as stage_b:
+        async with domain.subscribe(req, recorder_b) as sub_b:
             set_phase(PHASE_2)
-            await stage_b.update({"ETH"})
+            await sub_b.update({"ETH"})
             await asyncio.sleep(3)
 
         set_phase(PHASE_3)

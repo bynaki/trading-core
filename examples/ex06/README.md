@@ -8,7 +8,7 @@ ex05가 파생 스테이지가 상위에 **무엇을** 등록하는지(합집합
 > 구독 심볼의 합집합이 그대로면 generator를 재시작하지 않는다.
 
 이미 합집합에 들어 있는 심볼로 구독자가 하나 더 붙는 경우가 그렇다. 새 구독자는
-`SendRouter`에 등록되어 곧바로 데이터를 받지만, 상위 원천도 파생 generator도 건드리지
+`SymbolRouter`에 등록되어 곧바로 데이터를 받지만, 상위 원천도 파생 generator도 건드리지
 않는다. 반대로 합집합이 넓어지거나 좁아지면 두 계층이 함께 재시작한다.
 
 재시작은 공짜가 아니다. 실행 중인 태스크를 취소하고 `gen.aclose()`로 generator를 닫은
@@ -36,7 +36,7 @@ ex05가 파생 스테이지가 상위에 **무엇을** 등록하는지(합집합
 3·4단계에서는 재시작이 일어나야 하므로, 2단계의 "없음"이 규칙 때문인지 아니면 재시작
 자체가 고장 난 것인지 구분할 수 있다.
 
-`stage.update(symbols)`는 추가가 아니라 **교체**다. 4단계에서 빈 집합을 넘기면 B의 구독이
+`sub.update(symbols)`는 추가가 아니라 **교체**다. 4단계에서 빈 집합을 넘기면 B의 구독이
 사라진다.
 
 ## 실행
@@ -111,24 +111,24 @@ ex06: 정상: 합집합이 넓어지거나 좁아지면 두 계층이 한 번씩
 
 ## 어디를 검증하는가
 
-`domain.py`의 dependent 분기에 있는 조기 반환이다.
+`domain.py`의 파생 분기에 있는 조기 반환이다.
 
 ```python
 async def update(sender: Sender, symbols: set[str]):
     nonlocal active_symbols, gen
     async with update_lock:
-        shared_sender.set_sender(sender, symbols)   # 구독자 등록은 먼저 끝난다
-        current_symbols = shared_sender.symbols
+        router.replace(sender, symbols)          # 구독자 등록은 먼저 끝난다
+        current_symbols = router.symbols
         if current_symbols == active_symbols:
             return                                  # <-- 2단계가 여기서 빠져나간다
 ```
 
-`set_sender()`가 **조기 반환보다 앞에** 있는 것이 중요하다. 그래서 B는 generator를
+`replace()`가 **조기 반환보다 앞에** 있는 것이 중요하다. 그래서 B는 generator를
 건드리지 않고도 구독자 목록에 들어가 데이터를 받는다. 순서가 뒤바뀌면 B는 다음 재시작이
 일어날 때까지 아무것도 받지 못한다.
 
 같은 규칙이 원천 generator 분기에도 있고 그쪽은 ex01~ex03에서 자연히 지나간다. 이
-예제는 **dependent 분기**를 지나가게 하는 것이 목적이다.
+예제는 **파생 분기**를 지나가게 하는 것이 목적이다.
 
 ## 알아둘 점
 

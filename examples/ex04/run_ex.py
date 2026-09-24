@@ -41,7 +41,7 @@ async def run_ex(domain: Domain) -> None:
     log.info("━━━━━━━━━━ 시작: require로 상위 요청과 심볼을 함께 변환하기 ━━━━━━━━━━")
     log.info('----- OHLCRequest(quote="usd", interval="5m") -----')
     req01 = OHLCRequest(quote="usd", interval="5m")
-    async with domain.request(req01, {"BTC", "ETH"}) as gen:
+    async with domain.stream(req01, {"BTC", "ETH"}) as gen:
         count = 0
         async for data in gen:
             log_ohlc(cast_model(data, OHLCData))
@@ -50,7 +50,7 @@ async def run_ex(domain: Domain) -> None:
                 break
     log.info('----- OHLCRequest(quote="krw", interval="1h") -----')
     req02 = OHLCRequest(quote="krw", interval="1h")
-    async with domain.request(req02, {"BTC", "ETH"}) as gen:
+    async with domain.stream(req02, {"BTC", "ETH"}) as gen:
         count = 0
         async for data in gen:
             log_ohlc(cast_model(data, OHLCData))

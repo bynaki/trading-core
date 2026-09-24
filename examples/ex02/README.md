@@ -30,7 +30,7 @@ def naming(req: NamingReq) -> NamingContext:
 받아 상위 요청을 돌려주는 형태를 쓰는데, 심볼까지 변환하려면 `(req, symbols)`를 받는
 형태를 쓴다(ex04·ex05·ex06).
 
-`Domain`은 `NamingReq` 스테이지를 만들 때 `tr_require`를 확인한다. 필요한
+`Domain`은 `NamingReq` 스테이지를 만들 때 `tr_upstream`를 확인한다. 필요한
 `NamingAllReq` 원천 스테이지를 만들거나 기존 스테이지를 재사용하고, 원천의 출력을
 `Receiver`로 파생 binder에 연결한다. 파생 binder는 수신한 `NamingAllData`를
 `cast_model()`로 확인한 뒤 `kind`에 해당하는 필드만 `NamingData`로 내보낸다.
@@ -55,7 +55,7 @@ NamingAllReq
   따라서 flower·dog·cat 파생 스테이지가 하나의 원천을 공유한다.
 - `NamingReq`는 `kind`가 내용에 포함된다. 같은 `kind` 요청은 같은 파생 원천
   스테이지를 공유하고, 다른 `kind` 요청은 별도 파생 스테이지를 사용한다.
-- 같은 스테이지를 구독하는 여러 `Stage`의 심볼은 합집합으로 관리된다. 합집합이
+- 같은 스테이지를 구독하는 여러 구독의 심볼은 합집합으로 관리된다. 합집합이
   달라지면 현재 binder를 닫고 새 심볼 집합으로 다시 시작한다.
 
 `NamingAllContext.count`와 `NamingContext.count`는 각 binder가 몇 번 다시 시작됐는지
@@ -82,7 +82,7 @@ binder가 재시작되면 다시 1부터 시작한다.
 - 파생 binder에는 의존 원천과 연결된 `Receiver`가 필요하다. 연결 없이 실행되면
   예외를 발생시켜 잘못된 구성을 즉시 알린다.
 - 원천 binder는 계속 데이터를 발행하므로 소비자는 필요한 시점에 반복을 중단해야 한다.
-- 심볼별 라우팅은 `SendRouter`가 담당한다. 원천이 합집합의 데이터를 만들더라도
+- 심볼별 라우팅은 `SymbolRouter`가 담당한다. 원천이 합집합의 데이터를 만들더라도
   각 구독자는 자신이 등록한 심볼의 데이터만 받는다.
 
 ## 실행

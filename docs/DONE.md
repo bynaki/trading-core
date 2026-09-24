@@ -117,3 +117,10 @@ DEBUG(진단), `SendRouter`의 "Sender가 없다"는 WARNING. `on_task_exception
 값은 이름을 달아 indent=2 JSON으로 아래 줄에 펼친다.
 재현·검증: `uv run examples/main.py serial`·`parallel`. 형식 규칙은 tests/test_logger.py의
 `test_console_simple_text_format_drops_time_and_origin`, `test_text_fields_*` 세 개.
+
+### [done] naming:rename
+모듈·클래스·메서드·변수·타입 이름을 목적과 의미에 맞게 바꿨다. 1~33번 전부 적용했고, 목록과
+적용하며 달라진 점은 `docs/design.naming.md`에 있다. 요청 3종이 `SourceRequest`/`DerivedRequest`/
+`SessionRequest`가 되고, `Domain`의 공개 API가 `subscribe()`/`stream()`/`Subscription`/
+`get_shared_symbols()`로 바뀌었다. 직렬화 형식(모델 타입 리터럴, `tr_annotation`의 `uid`·`created_by`
+키)도 바뀌었으므로 옛 형식으로 저장한 덤프는 `load_model()`로 되살릴 수 없다.

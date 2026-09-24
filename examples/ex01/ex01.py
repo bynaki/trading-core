@@ -1,10 +1,10 @@
-"""`Domain.request()`로 소비하는 단순 카운트 원천 제너레이터 예제."""
+"""`Domain.stream()`으로 소비하는 단순 카운트 원천 제너레이터 예제."""
 
 from asyncio import sleep
 
 from trading_core import (
     DataModel,
-    GenerateModel,
+    SourceRequest,
     get_model_id,
     initialize,
 )
@@ -14,7 +14,7 @@ log = get_logger("ex01.count")
 """원천 binder의 로거. 이름을 직접 주어 실행 방식과 관계없이 `ex01.` 접두를 유지한다."""
 
 
-class CountReq(GenerateModel):
+class CountReq(SourceRequest):
     """카운트 스트림의 시작값을 전달하는 요청 모델."""
 
     start: int

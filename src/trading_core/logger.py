@@ -554,6 +554,24 @@ def shutdown() -> None:
         _state.closed = True
 
 
+def get_identity() -> Identity:
+    """이 프로세스의 발신처. 레코드에 싣는 `service`/`host`/`pid`/`instance_id`와 같은 값이다.
+
+    구성되어 있으면 그 값이고, 아니면 설정 탐색으로 `service_name`만 읽어 계산한다(구성하지는
+    않는다). 설정이 잘못되었으면 `service_name` 없이(호스트 이름으로) 계산한다 — 설정 오류는 로그를
+    처음 남기거나 `configure()`할 때 드러난다.
+    """
+
+    with _state.lock:
+        if _state.identity is not None:
+            return _state.identity
+    try:
+        service_name = load_settings().service_name
+    except LogConfigError:
+        service_name = None
+    return Identity.current(service_name)
+
+
 def _ensure_configured() -> None:
     if _state.configured or _state.closed:
         return

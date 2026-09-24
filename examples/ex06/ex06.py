@@ -6,7 +6,7 @@ ex05가 "상위에 **무엇을** 등록하는가"(합집합)를 다뤘다면, �
     구독 심볼의 합집합이 그대로면 generator를 재시작하지 않는다.
 
 이미 합집합에 들어 있는 심볼로 구독자가 하나 더 붙는 경우가 그렇다. 새 구독자는
-`SendRouter`에 등록되어 곧바로 데이터를 받지만, 상위 원천도 파생 generator도
+`SymbolRouter`에 등록되어 곧바로 데이터를 받지만, 상위 원천도 파생 generator도
 그대로 돌아간다. 반대로 합집합이 넓어지거나 좁아지면 두 계층이 함께 재시작한다.
 
 각 generator는 자신이 몇 회차로 (재)시작했는지 로그로 남기고 `GEN_STARTS`에 기록한다.
@@ -16,7 +16,7 @@ ex05가 "상위에 **무엇을** 등록하는가"(합집합)를 다뤘다면, �
 from asyncio import sleep
 from typing import Literal
 
-from trading_core import DataModel, DependentModel, GenerateModel, initialize
+from trading_core import DataModel, DerivedRequest, SourceRequest, initialize
 from trading_core.logger import get_logger
 from trading_core.model import Receiver, cast_model
 
@@ -45,7 +45,7 @@ def base_of(symbol: str) -> str:
     return symbol[: -len(QUOTE_SUFFIX)]
 
 
-class FeedRequest(GenerateModel):
+class FeedRequest(SourceRequest):
     """거래소 표기 심볼로 체결가를 요청하는 원천 요청."""
 
     venue: Literal["mockex"]
@@ -83,7 +83,7 @@ async def _(ctx: FeedRequest, symbols: set[str]):
         await sleep(0.5)
 
 
-class QuoteRequest(DependentModel):
+class QuoteRequest(DerivedRequest):
     """기초 자산 심볼만 받아 체결가를 돌려주는 파생 요청."""
 
     market: Literal["spot"]

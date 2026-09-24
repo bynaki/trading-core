@@ -1,18 +1,18 @@
-"""`Domain.stage()`의 동적 심볼 갱신을 보여주는 가격 스트림 예제."""
+"""`Domain.subscribe()`의 동적 심볼 갱신을 보여주는 가격 스트림 예제."""
 
 import random
 from asyncio import sleep
 from collections.abc import Set
 from typing import Literal
 
-from trading_core import DataModel, GenerateModel, initialize
+from trading_core import DataModel, SourceRequest, initialize
 from trading_core.logger import get_logger
 
 log = get_logger("ex03.price")
 """원천 binder의 로거. 이름을 직접 주어 실행 방식과 관계없이 `ex03.` 접두를 유지한다."""
 
 
-class PriceReq(GenerateModel):
+class PriceReq(SourceRequest):
     """가격 증가 단위를 결정할 OHLC 종류를 지정하는 요청."""
 
     ohlc: Literal["open", "high", "low", "close"]

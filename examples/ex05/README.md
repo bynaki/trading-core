@@ -1,6 +1,6 @@
 # ex05: 같은 파생 요청을 서로 다른 심볼로 동시에 구독하기
 
-파생 요청(`DependentModel`)을 여러 소비자가 **서로 다른 심볼 집합으로 동시에** 구독하는
+파생 요청(`DerivedRequest`)을 여러 소비자가 **서로 다른 심볼 집합으로 동시에** 구독하는
 상황을 다룬다. ex04가 요청을 순차로 실행하는 것과 달리, 여기서는 구독을 열어 둔 채 다른
 구독을 붙였다 뗀다.
 
@@ -26,9 +26,9 @@
 
 ## 시나리오
 
-`Domain.request()` 대신 저수준 `Domain.stage()`를 쓴다. 구독을 열어 둔 채 다른 구독을
+`Domain.stream()` 대신 저수준 `Domain.subscribe()`를 쓴다. 구독을 열어 둔 채 다른 구독을
 붙였다 떼야 하고, 데이터가 오지 않는 구독자도 블로킹 없이 관찰해야 하기 때문이다.
-(`Domain.request()`의 `async for`는 데이터가 없으면 그대로 멈춰 있어, 한쪽이 아무것도
+(`Domain.stream()`의 `async for`는 데이터가 없으면 그대로 멈춰 있어, 한쪽이 아무것도
 받지 못하는 상황 자체를 관찰할 수 없다.)
 
 | 단계 | 상태 | 상위 원천에 등록되어야 하는 심볼 |
@@ -38,7 +38,7 @@
 | 3단계 | B 구독 해제, A만 남음 | `{BTC/USD}` |
 
 두 구독자의 요청은 `PriceRequest(quote="usd")`로 같다. `content_id`가 같으니 하나의
-파생 스테이지를 공유하고, 심볼은 `SendRouter`가 합집합으로 관리한다.
+파생 스테이지를 공유하고, 심볼은 `SymbolRouter`가 합집합으로 관리한다.
 
 ## 실행
 
@@ -88,25 +88,25 @@ ex05: 정상: B가 떠난 뒤 A의 상위 구독이 남아 있다.
 
 ## 원인과 해결
 
-결함이 있던 시절 `domain.py`의 `dependent_generator` 브랜치는 이랬다.
+결함이 있던 시절 `domain.py`의 파생(`derived`) 브랜치는 이랬다.
 
 ```python
 async def update(sender: Sender, symbols: set[str]):
     async with update_lock:
-        require, req_symbols = req.get_tr_require_with_symbol(symbols)  # <-- 이번 update뿐
-        shared_sender.set_sender(sender, symbols)
-        current_symbols = shared_sender.symbols                          # <-- 합집합
+        upstream, upstream_symbols = req.resolve_upstream(symbols)  # <-- 이번 update뿐
+        router.replace(sender, symbols)
+        current_symbols = router.symbols                                   # <-- 합집합
         ...
-        await self._ensure_require_stage(require, transq, req_symbols)   # <-- 합집합 아님
-        gen = binded_cb(ctx, set(current_symbols))                       # <-- 합집합
+        await self._ensure_upstream_stage(upstream, channel, upstream_symbols)  # <-- 합집합 아님
+        gen = derived_cb(ctx, set(current_symbols))                        # <-- 합집합
 ```
 
 한 스테이지 안에 심볼 집합이 두 개 돌아다녔다. 파생 binder에는 합집합(`current_symbols`)이
-가는데, 상위 원천에는 그 시점 update의 심볼만 변환한 `req_symbols`가 갔다.
+가는데, 상위 원천에는 그 시점 update의 심볼만 변환한 `upstream_symbols`가 갔다.
 
-게다가 상위 원천에 등록하는 `Sender`는 이 파생 스테이지의 `transq` **하나뿐**이다.
-`SendRouter.set_sender()`는 같은 sender의 이전 등록을 지우고 새로 넣으므로, 두 번째
-update의 `req_symbols`가 첫 번째 것을 통째로 덮어썼다. 구독자별로 쌓이지 않는다.
+게다가 상위 원천에 등록하는 `Sender`는 이 파생 스테이지의 `channel` **하나뿐**이다.
+`SymbolRouter.replace()`는 같은 sender의 이전 등록을 지우고 새로 넣으므로, 두 번째
+update의 `upstream_symbols`가 첫 번째 것을 통째로 덮어썼다. 구독자별로 쌓이지 않는다.
 
 증상은 두 가지였다.
 
@@ -120,20 +120,20 @@ update의 `req_symbols`가 첫 번째 것을 통째로 덮어썼다. 구독자�
              async def update(sender: Sender, symbols: set[str]):
                  nonlocal active_symbols, gen
                  async with update_lock:
--                    require, req_symbols = req.get_tr_require_with_symbol(symbols)
-                     shared_sender.set_sender(sender, symbols)
-                     current_symbols = shared_sender.symbols
+-                    upstream, upstream_symbols = req.resolve_upstream(symbols)
+                     router.replace(sender, symbols)
+                     current_symbols = router.symbols
                      if current_symbols == active_symbols:
                          return
-+                    require, req_symbols = req.get_tr_require_with_symbol(current_symbols)
++                    upstream, upstream_symbols = req.resolve_upstream(current_symbols)
 ```
 
-`set_sender()` 뒤로 옮기는 것이 핵심이다. 파생 binder가 이미 합집합을 받고 있으니,
+`replace()` 뒤로 옮기는 것이 핵심이다. 파생 binder가 이미 합집합을 받고 있으니,
 상위에도 같은 기준을 적용해 두 계층을 일치시킨다.
 
 ### 전제
 
 `require` 콜백은 **심볼에 따라 다른 상위 요청을 반환하면 안 된다.** 파생 스테이지는
-`transq` 하나로 상위 하나만 바라보므로, 심볼별로 원천을 갈라야 하는 요구가 생기면
+`channel` 하나로 상위 하나만 바라보므로, 심볼별로 원천을 갈라야 하는 요구가 생기면
 상위 스테이지를 여러 개 들 수 있는 구조가 따로 필요하다. ex04처럼 요청 필드(`quote`)로만
 상위가 갈리는 형태는 `content_id`가 달라 파생 스테이지 자체가 분리되므로 무관하다.

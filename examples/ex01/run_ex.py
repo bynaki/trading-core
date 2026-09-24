@@ -20,9 +20,9 @@ log = get_logger("ex01")
 async def run_ex(domain: Domain) -> None:
     """카운트 10까지 출력한 뒤 요청을 닫아 정리 콜백을 실행한다."""
 
-    log.info("━━━━━━━━━━ 시작: Domain.request()로 카운트 스트림 받기 ━━━━━━━━━━")
+    log.info("━━━━━━━━━━ 시작: Domain.stream()으로 카운트 스트림 받기 ━━━━━━━━━━")
     req01 = CountReq(start=1)
-    async with domain.request(req01, {"BTC", "USDT", "ETH", "XRP"}) as gen:
+    async with domain.stream(req01, {"BTC", "USDT", "ETH", "XRP"}) as gen:
         async for data in gen:
             d = cast_model(data, CountData)
             log.info("수신", symbol=d.symbol, count=d.count)

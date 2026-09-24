@@ -6,7 +6,7 @@
 
 from asyncio import sleep
 
-from trading_core import DataModel, GenerateModel, initialize
+from trading_core import DataModel, SourceRequest, initialize
 from trading_core.logger import get_logger
 
 log = get_logger(__name__)
@@ -16,7 +16,7 @@ wire = get_logger("ex09.wire")
 """틱마다 원시 페이로드를 찍는 시끄러운 로거. `setting.toml`의 `[log.levels]`로 누른다."""
 
 
-class PriceFeedReq(GenerateModel):
+class PriceFeedReq(SourceRequest):
     """심볼별 가격을 흉내 내는 피드 요청."""
 
     base: float
@@ -32,7 +32,7 @@ class FeedCtx:
     def __init__(self, req: PriceFeedReq):
         self.req = req
         self.ticks = 0
-        log.info("피드 연결", base=req.base, content_id=req.get_tr_content_id())
+        log.info("피드 연결", base=req.base, content_id=req.tr_content_id)
 
 
 @initialize

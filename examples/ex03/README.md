@@ -1,6 +1,6 @@
-# ex03: `Domain.stage()`로 구독 심볼 직접 갱신하기
+# ex03: `Domain.subscribe()`로 구독 심볼 직접 갱신하기
 
-이 예제는 `Domain.request()`보다 낮은 수준의 API인 `Domain.stage()`를 사용한다.
+이 예제는 `Domain.stream()`보다 낮은 수준의 API인 `Domain.subscribe()`를 사용한다.
 호출자가 출력 `Sender`를 직접 제공하고, 스테이지가 열린 동안 `update()`를 여러 번
 호출하여 구독 심볼을 동적으로 추가하거나 제거한다.
 
@@ -24,19 +24,19 @@
 세 번 선택되면 가격은 100, 200, 300 순서로 증가한다. 심볼 합집합 변경으로 binder가
 재시작되어도 동일한 원천 컨텍스트를 사용하므로 누적 횟수는 유지된다.
 
-## `Domain.stage()` 사용 흐름
+## `Domain.subscribe()` 사용 흐름
 
 ```python
 sender = TestSender("symbols01")
 req = PriceReq(ohlc="close")
 
-async with domain.stage(req, sender) as stage:
-    await stage.update({"BTC"})
-    await stage.update({"BTC", "ETH"})
-    await stage.update({"ETH"})
+async with domain.subscribe(req, sender) as sub:
+    await sub.update({"BTC"})
+    await sub.update({"BTC", "ETH"})
+    await sub.update({"ETH"})
 ```
 
-`stage()`에는 다음 두 요소를 직접 전달한다.
+`subscribe()`에는 다음 두 요소를 직접 전달한다.
 
 - 요청 모델: 어떤 원천 제너레이터를 사용할지와 원천 스테이지의 `content_id`를 정한다.
 - `Sender`: 해당 스테이지가 구독한 심볼의 `PriceData`를 받을 비동기 호출 객체다.
@@ -53,20 +53,20 @@ async with domain.stage(req, sender) as stage:
 각 실행 루프는 자신의 심볼을 단계적으로 추가·제거하고 다음 값을 비교한다.
 
 - 현재 개별 스테이지가 요청한 `symbols`
-- `domain.get_origin_stage(content_id).output.symbols`에 저장된 전체 합집합
+- `domain.get_shared_symbols(content_id)`가 돌려주는 전체 합집합
 
 두 값은 `심볼 추가`·`심볼 제거` 줄의 `symbols`·`origin` 필드로 남는다. 개별 심볼 집합이
 원천 합집합에 포함된다는 assertion으로 공유 상태를 확인한다.
-`SendRouter`는 원천에서 무작위로 선택된 심볼의 데이터를 그 심볼을 구독한 sender에만
+`SymbolRouter`는 원천에서 무작위로 선택된 심볼의 데이터를 그 심볼을 구독한 sender에만
 전달한다. `수신 symbols01`·`수신 symbols02` 줄로 어느 sender가 받았는지 보인다.
 
 ## 정리 시점
 
 - binder의 `finally`는 심볼 합집합이 바뀌어 업데이트가 재시작될 때마다 실행된다.
 - `@price.detached`는 마지막 스테이지가 닫혀 전체 심볼 합집합이 비었을 때 실행된다.
-- `async with domain.stage(...)`를 벗어나면 해당 sender의 구독은 자동으로 제거된다.
+- `async with domain.subscribe(...)`를 벗어나면 해당 sender의 구독은 자동으로 제거된다.
 
-빈 합집합에서는 binder를 실행하지 않으므로 `random.choice()`에 빈 시퀀스가 전달되지
+빈 합집합에서는 binder를 실행하지 않으므로 `random.choice()`에 빈 파이프라인이 전달되지
 않는다. 예제 binder 자체는 무한 스트림이므로 반드시 스테이지 컨텍스트나 `Domain`을
 정상적으로 종료해야 한다.
 

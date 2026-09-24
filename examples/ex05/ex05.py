@@ -15,7 +15,7 @@ ex04와 같은 구조(기초 자산 → 거래소 표기로 심볼을 변환하�
 from asyncio import sleep
 from typing import Literal
 
-from trading_core import DataModel, DependentModel, GenerateModel, initialize
+from trading_core import DataModel, DerivedRequest, SourceRequest, initialize
 from trading_core.logger import get_logger
 from trading_core.model import Receiver, cast_model
 
@@ -42,7 +42,7 @@ def base_of(symbol: str) -> str:
     return symbol[: -len(QUOTE_SUFFIX)]
 
 
-class TickRequest(GenerateModel):
+class TickRequest(SourceRequest):
     """거래소 표기 심볼로 체결가를 요청하는 원천 요청."""
 
     venue: Literal["mockex"]
@@ -80,7 +80,7 @@ async def _(ctx: TickRequest, symbols: set[str]):
         await sleep(0.5)
 
 
-class PriceRequest(DependentModel):
+class PriceRequest(DerivedRequest):
     """기초 자산 심볼만 받아 체결가를 돌려주는 파생 요청."""
 
     quote: Literal["usd"]

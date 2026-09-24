@@ -1,6 +1,6 @@
 """`binder.py` 명세 — `initialize()` 등록 규칙과 전역 레지스트리.
 
-여기서 쓰는 요청 모델은 모두 이 모듈 전용이다. `BindPack._binder_dict`가 프로세스
+여기서 쓰는 요청 모델은 모두 이 모듈 전용이다. `BindPack._registry`가 프로세스
 전역이라 다른 테스트 모듈과 요청 타입을 공유하면 등록이 서로 간섭한다.
 """
 
@@ -11,15 +11,15 @@ import pytest
 from trading_core import (
     BindError,
     DataModel,
-    DependentModel,
-    DependentModelBinder,
-    GenerateModel,
-    GenerateModelBinder,
+    DerivedBinder,
+    DerivedRequest,
     ModelError,
+    Pipeline,
     Receiver,
-    RequestModel,
-    RequestModelBinder,
-    Sequence,
+    SessionBinder,
+    SessionRequest,
+    SourceBinder,
+    SourceRequest,
     get_model_id,
     get_model_type,
     initialize,
@@ -27,32 +27,32 @@ from trading_core import (
 from trading_core.binder import BindPack
 
 
-class GenReq(GenerateModel):
+class GenReq(SourceRequest):
     """generate 콜백을 바인드할 원천 요청."""
 
     tag: str
 
 
-class DepReq(DependentModel):
+class DepReq(DerivedRequest):
     """`GenReq`를 상위로 요구하는 파생 요청."""
 
     tag: str
 
 
-class SymDepReq(DependentModel):
+class SymDepReq(DerivedRequest):
     """심볼까지 변환하는 require 콜백을 쓰는 파생 요청."""
 
     tag: str
 
 
-class NoRequireReq(DependentModel):
+class NoRequireReq(DerivedRequest):
     """require를 일부러 등록하지 않은 파생 요청."""
 
     tag: str
 
 
-class ReqReq(RequestModel):
-    """bind/unbind/require 콜백을 붙일 요청."""
+class ReqReq(SessionRequest):
+    """bind/unbind/always 콜백을 붙일 요청."""
 
     tag: str
 
@@ -85,32 +85,32 @@ async def _(ctx: GenReq) -> None:
     """등록만 하는 detach 콜백."""
 
 
-def test_initialize_returns_generate_binder():
-    """`GenerateModel`을 받는 init 콜백은 `GenerateModelBinder`를 낸다."""
+def test_initialize_returns_source_binder():
+    """`SourceRequest`를 받는 init 콜백은 `SourceBinder`를 낸다."""
 
-    assert isinstance(gen_binder, GenerateModelBinder)
+    assert isinstance(gen_binder, SourceBinder)
 
 
-def test_generate_binding_marks_model_type():
-    """generate 콜백을 바인드하면 요청 타입이 "generator"가 된다."""
+def test_source_binding_marks_model_type():
+    """generate 콜백을 바인드하면 요청 타입이 "source"가 된다."""
 
-    assert get_model_type(GenReq) == "generator"
+    assert get_model_type(GenReq) == "source"
 
 
 def test_bind_pack_is_registered_by_model_id():
     """레지스트리는 `model_id`를 키로 쓴다."""
 
-    pack = BindPack.get_binder(get_model_id(GenReq))
+    pack = BindPack.lookup(get_model_id(GenReq))
     assert pack is not None
-    assert pack.request_t is GenReq
-    assert pack.get_generate_cb(GenReq(tag="probe")) is not None
+    assert pack.request_type is GenReq
+    assert pack.get_source_cb(GenReq(tag="probe")) is not None
     assert pack.get_detach_cb() is not None
 
 
 def test_unknown_model_id_has_no_binder():
     """등록되지 않은 `model_id`는 `None`."""
 
-    assert BindPack.get_binder("NoSuchModel@nowhere:0000000000000000") is None
+    assert BindPack.lookup("NoSuchModel@nowhere:0000000000000000") is None
 
 
 def test_rebinding_generate_callback_is_rejected():
@@ -198,33 +198,33 @@ def _(req: SymDepReq, symbols: set[str]) -> tuple[GenReq, set[str]]:
 
 
 def test_initialize_returns_dependent_binder():
-    """`DependentModel`을 받는 init 콜백은 `DependentModelBinder`를 낸다."""
+    """`DerivedRequest`를 받는 init 콜백은 `DerivedBinder`를 낸다."""
 
-    assert isinstance(dep_binder, DependentModelBinder)
+    assert isinstance(dep_binder, DerivedBinder)
 
 
-def test_dependent_binding_marks_model_type():
-    """dependent 콜백을 바인드하면 요청 타입이 "dependent_generator"가 된다."""
+def test_derived_binding_marks_model_type():
+    """derived 콜백을 바인드하면 요청 타입이 "derived"가 된다."""
 
-    assert get_model_type(DepReq) == "dependent_generator"
+    assert get_model_type(DepReq) == "derived"
 
 
 def test_plain_require_passes_symbols_through():
     """요청만 받는 require는 심볼 집합을 그대로 흘려보내도록 정규화된다."""
 
     req = DepReq(tag="t")
-    assert req.tr_require.get_tr_content_id() == GenReq(tag="t").get_tr_content_id()
+    assert req.tr_upstream.tr_content_id == GenReq(tag="t").tr_content_id
 
-    upstream, symbols = req.get_tr_require_with_symbol({"BTC", "ETH"})
-    assert upstream.get_tr_content_id() == GenReq(tag="t").get_tr_content_id()
+    upstream, symbols = req.resolve_upstream({"BTC", "ETH"})
+    assert upstream.tr_content_id == GenReq(tag="t").tr_content_id
     assert symbols == {"BTC", "ETH"}
 
 
 def test_require_with_symbols_transforms_symbols():
     """심볼까지 받는 require는 상위에 넘길 심볼을 바꿀 수 있다."""
 
-    upstream, symbols = SymDepReq(tag="t").get_tr_require_with_symbol({"BTC", "ETH"})
-    assert upstream.get_tr_content_id() == GenReq(tag="t").get_tr_content_id()
+    upstream, symbols = SymDepReq(tag="t").resolve_upstream({"BTC", "ETH"})
+    assert upstream.tr_content_id == GenReq(tag="t").tr_content_id
     assert symbols == {"BTC/USD", "ETH/USD"}
 
 
@@ -232,9 +232,9 @@ def test_missing_require_raises_on_use():
     """require가 없는 파생 요청은 상위 요청을 물었을 때 `ModelError`."""
 
     with pytest.raises(ModelError):
-        _ = NoRequireReq(tag="t").tr_require
+        _ = NoRequireReq(tag="t").tr_upstream
     with pytest.raises(ModelError):
-        NoRequireReq(tag="t").get_tr_require_with_symbol({"BTC"})
+        NoRequireReq(tag="t").resolve_upstream({"BTC"})
 
 
 def test_require_is_registered_per_subclass():
@@ -244,33 +244,33 @@ def test_require_is_registered_per_subclass():
     assert NoRequireReq._tr_require_cb is None
 
 
-# ===== RequestModel =====
+# ===== SessionRequest =====
 
 
 @initialize
 def req_binder(req: ReqReq) -> ReqReq:
-    """요청형 모델의 init 콜백."""
+    """세션 요청의 init 콜백."""
 
     return req
 
 
 @req_binder
 async def _(ctx: ReqReq, symbol: str):
-    """심볼 하나를 시퀀스로 묶는 bind 콜백."""
+    """심볼 하나를 파이프라인으로 묶는 bind 콜백."""
 
     yield ctx(symbol)
 
 
-def test_initialize_returns_request_binder():
-    """`RequestModel`을 받는 init 콜백은 `RequestModelBinder`를 낸다."""
+def test_initialize_returns_session_binder():
+    """`SessionRequest`를 받는 init 콜백은 `SessionBinder`를 낸다."""
 
-    assert isinstance(req_binder, RequestModelBinder)
+    assert isinstance(req_binder, SessionBinder)
 
 
-def test_request_binding_marks_model_type():
-    """bind 콜백을 붙이면 요청 타입이 "instanter"가 된다."""
+def test_session_binding_marks_model_type():
+    """bind 콜백을 붙이면 요청 타입이 "session"이 된다."""
 
-    assert get_model_type(ReqReq) == "instanter"
+    assert get_model_type(ReqReq) == "session"
 
 
 def test_rebinding_bind_callback_is_rejected():
@@ -283,15 +283,15 @@ def test_rebinding_bind_callback_is_rejected():
         req_binder.bind(another_bind)
 
 
-def test_require_callback_can_only_be_set_once():
-    """require 콜백은 하나만 등록할 수 있다."""
+def test_always_callback_can_only_be_set_once():
+    """always 콜백은 하나만 등록할 수 있다."""
 
-    async def requirement(ctx: ReqReq) -> AsyncGenerator[Sequence]:
+    async def always(ctx: ReqReq) -> AsyncGenerator[Pipeline]:
         yield ctx("BTC")
 
-    req_binder.require(requirement)
+    req_binder.always(always)
     with pytest.raises(BindError):
-        req_binder.require(requirement)
+        req_binder.always(always)
 
 
 def test_unbind_callback_can_only_be_set_once():

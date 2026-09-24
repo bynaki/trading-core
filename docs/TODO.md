@@ -10,23 +10,23 @@
 ### policy:callback-exception
 TaskManager: task에서 예외가 발생했을 때 TaskManager 단에서 처리할 방법이 없다. 사용자 콜백
 (`unbind_cb`·`detach_cb`)이 `TaskGroup` 안에서 던지면 `detach()`가 중간에 끊겨 상위 스테이지가
-안 내려가고 `stage.update`/`detach` 교체도 안 된다. generate 콜백의 `finally`도 같은 노출을 갖는다.
+안 내려가고 `sub.update`/`detach` 교체도 안 된다. generate 콜백의 `finally`도 같은 노출을 갖는다.
 정책이 **사용자 결정 대기** 중이므로 임의로 구현하지 말 것.
 
 사용자에게 제시한 선택지:
 1. 로그만 남기고 계속 — 정리는 항상 끝나지만 오류를 놓치기 쉽다.
 2. **정리를 끝까지 한 뒤 모은 오류를 `ExceptionGroup`으로 재발생** (추천) — 정리 보장 + 호출자도
-   오류를 본다. 현재 `TaskGroup` 스타일과 맞는다. 덧붙여 `SendRouter`에서 Sender 하나의 실패를
+   오류를 본다. 현재 `TaskGroup` 스타일과 맞는다. 덧붙여 `SymbolRouter`에서 Sender 하나의 실패를
    격리해 공유 generator가 죽지 않게 한다.
 3. 스테이지별 실패 콜백 — 가장 유연하지만 API가 늘어난다.
 
 손댈 자리(`src/trading_core/`):
-- `domain.py` `_define_inst_stage()`의 `unbind_symbols()`·`detach()` — 콜백이 던지면 `detach()`가
+- `domain.py` `_create_session_subscription()`의 `unbind_symbols()`·`detach()` — 콜백이 던지면 `detach()`가
   중간에 끊긴다.
-- `domain.py` 원천 스테이지 `update()`들의 `bind_pack._detach_cb` 호출, generate 콜백의 `finally`.
-- `domain.py` `SendRouter.__call__` — `TaskGroup` 안에서 Sender 하나가 던지면 전체가 실패.
-- `domain.py` `_task_sequence()` — `seq.invoke()`가 던지면 슬롯 태스크가 조용히 죽는다.
-- `helper.py` `TaskManager._task_wrapper()` / `on_task_failure()` — 현재 태스크 예외 처리 지점.
+- `domain.py` 공유 스테이지 `update()`들의 detach 콜백 호출, generate 콜백의 `finally`.
+- `routing.py` `SymbolRouter.__call__` — `TaskGroup` 안에서 Sender 하나가 던지면 전체가 실패.
+- `domain.py` `_run_pipeline_slot()` — `pipeline.invoke()`가 던지면 슬롯 태스크가 조용히 죽는다.
+- `tasks.py` `TaskManager._task_wrapper()` / `set_failure_callback()` — 현재 태스크 예외 처리 지점.
 
 ### [done] logger:core
 프로젝트 전반 로그 모듈(`logger.py`). 설계는 `docs/design.log.md`에 있다. `setting.toml`의 `[log]`

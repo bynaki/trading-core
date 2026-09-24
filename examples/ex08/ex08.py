@@ -1,17 +1,17 @@
-"""같은 내용의 `RequestModel` 두 개가 컨텍스트를 공유하지 않는 것을 보이는 예제.
+"""같은 내용의 `SessionRequest` 두 개가 컨텍스트를 공유하지 않는 것을 보이는 예제.
 
-`GenerateModel`과 `DependentModel`은 **content_id 단위로 공유**된다. 필드 값이 같은
-요청을 두 소비자가 보내면 `Domain`은 `_origin_stage_dict[content_id]`에 있는 하나의
+`SourceRequest`와 `DerivedRequest`는 **content_id 단위로 공유**된다. 필드 값이 같은
+요청을 두 소비자가 보내면 `Domain`은 `_shared_stages[content_id]`에 있는 하나의
 원천 스테이지를 재사용하고, init 콜백은 한 번만 불린다.
 
-`RequestModel`(instanter)은 그렇지 않다. `Domain._define_inst_stage()`는
-`_origin_stage_dict`를 아예 보지 않는다. 요청을 보낼 때마다 새 스테이지를 만들고 init
+`SessionRequest`(세션 요청)는 그렇지 않다. `Domain._create_session_subscription()`는
+`_shared_stages`를 아예 보지 않는다. 요청을 보낼 때마다 새 스테이지를 만들고 init
 콜백을 다시 불러 **자기만의 컨텍스트**를 갖는다. content_id가 같아도 마찬가지다.
 
 이 예제는 그 차이를 한 화면에 겹쳐 놓는다.
 
 - 원천 `BeatReq`는 두 소비자가 하나를 공유한다 — `BeatCtx`가 한 번만 만들어진다.
-- 요청형 `WatchReq(quote="USD")`는 두 소비자가 각각 갖는다 — content_id가 같은데도
+- 세션 요청 `WatchReq(quote="USD")`는 두 소비자가 각각 갖는다 — content_id가 같은데도
   `WatchCtx`가 두 번 만들어지고, 같은 `"BTC"` 슬롯이 스테이지마다 따로 열린다.
 
 컨텍스트가 나뉜다는 것은 `WatchCtx.seen` 같은 상태가 소비자별로 따로 센다는 뜻이다.
@@ -23,11 +23,11 @@ from typing import Literal
 
 from pydantic import BaseModel
 
-from trading_core import DataModel, GenerateModel, Runnable, initialize
+from trading_core import DataModel, Runnable, SourceRequest, initialize
 from trading_core.logger import get_logger
-from trading_core.model import RequestModel
+from trading_core.model import SessionRequest
 
-# 계층마다 로거를 따로 둔다. 줄마다 붙는 이름이 원천(`beat`)과 요청형(`watch`)을 가른다.
+# 계층마다 로거를 따로 둔다. 줄마다 붙는 이름이 원천(`beat`)과 세션(`watch`)을 가른다.
 beat_log = get_logger("ex08.beat")
 watch_log = get_logger("ex08.watch")
 
@@ -40,7 +40,7 @@ INIT_PRICE_DICT: dict[str, float] = {
 type QuoteType = Literal["USD"]
 
 
-class BeatReq(GenerateModel):
+class BeatReq(SourceRequest):
     """상위 원천 요청. 필드가 없으므로 content_id가 하나뿐이다."""
 
 
@@ -82,7 +82,7 @@ async def _(ctx: BeatCtx, symbols: set[str]):
             await sleep(0.5)
 
 
-class WatchReq(RequestModel):
+class WatchReq(SessionRequest):
     """관찰 요청. 필드가 `quote` 하나뿐이라 같은 값이면 content_id가 같다.
 
     그런데도 이 요청으로 만든 스테이지는 서로 공유되지 않는다. 그것이 이 예제의 주제다.
@@ -100,7 +100,7 @@ class WatchData(DataModel):
 
 
 class WatchCtx(BaseModel):
-    """요청형 스테이지의 컨텍스트.
+    """세션 스테이지의 컨텍스트.
 
     `seen`은 이 스테이지가 지금까지 내보낸 데이터 수다. 컨텍스트가 공유된다면 두
     소비자의 수신이 이 하나의 카운터에 섞이겠지만, 실제로는 스테이지마다 따로 센다.
@@ -117,16 +117,16 @@ _watch_ctx_count = 0
 
 @initialize
 def watch(req: WatchReq) -> WatchCtx:
-    """요청형 컨텍스트를 만든다. content_id가 같아도 요청마다 다시 불린다."""
+    """세션 컨텍스트를 만든다. content_id가 같아도 요청마다 다시 불린다."""
 
     global _watch_ctx_count
     _watch_ctx_count += 1
-    watch_log.info(f"WatchCtx 생성 #{_watch_ctx_count}", content_id=req.get_tr_content_id())
+    watch_log.info(f"WatchCtx 생성 #{_watch_ctx_count}", content_id=req.tr_content_id)
     return WatchCtx(no=_watch_ctx_count, quote=req.quote)
 
 
 class WatchRunnable(Runnable):
-    """상위 `BeatData`를 하위 표기의 `WatchData`로 바꾸는 시퀀스 단계.
+    """상위 `BeatData`를 하위 표기의 `WatchData`로 바꾸는 파이프라인 단계.
 
     자기 스테이지의 컨텍스트를 들고 있다가 `seen`을 올린다. 이 값이 스테이지별로 따로
     세어지는 것이 컨텍스트가 나뉘어 있다는 증거다.
@@ -150,7 +150,7 @@ class WatchRunnable(Runnable):
 
 @watch
 async def _(ctx: WatchCtx, symbol: str):
-    """하위 심볼 하나를 상위 표기로 바꿔 구독하는 시퀀스를 낸다.
+    """하위 심볼 하나를 상위 표기로 바꿔 구독하는 파이프라인을 낸다.
 
     두 소비자가 같은 `"BTC"`를 구독해도 이 콜백은 스테이지마다 한 번씩, 즉 **두 번**
     불린다. 스테이지가 공유된다면 한 번이었을 것이다.

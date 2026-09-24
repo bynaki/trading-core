@@ -31,7 +31,7 @@ async def run_ex(domain: Domain) -> None:
 
         req = NamingReq(kind=kind)
         i = 0
-        async with domain.request(req, symbols) as gen:
+        async with domain.stream(req, symbols) as gen:
             async for data in gen:
                 if i >= count:
                     break

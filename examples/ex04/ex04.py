@@ -16,7 +16,7 @@ import re
 from asyncio import sleep
 from typing import Literal
 
-from trading_core import DataModel, DependentModel, GenerateModel, initialize
+from trading_core import DataModel, DerivedRequest, SourceRequest, initialize
 from trading_core.logger import get_logger
 from trading_core.model import Receiver, cast_model
 
@@ -34,7 +34,7 @@ def base_of(symbol: str) -> str:
     return matched.group(1)
 
 
-class BinanceRequest(GenerateModel):
+class BinanceRequest(SourceRequest):
     """USD 마켓 캔들을 요청하는 원천 요청. `interval`이 봉의 주기다."""
 
     interval: Literal["1m", "5m", "1h"]
@@ -160,7 +160,7 @@ async def _(ctx: BinanceRequest, symbols: set[str]):
                 await sleep(0.5)
 
 
-class UpbitRequest(GenerateModel):
+class UpbitRequest(SourceRequest):
     """KRW 마켓 캔들을 요청하는 원천 요청. 지원 주기가 USD 마켓과 다르다."""
 
     interval: Literal["5m", "30m", "1h"]
@@ -557,7 +557,7 @@ async def _(ctx: UpbitRequest, symbols: set[str]):
                 await sleep(0.5)
 
 
-class OHLCRequest(DependentModel):
+class OHLCRequest(DerivedRequest):
     """견적 통화와 주기만 지정하면 거래소를 가리지 않는 파생 요청.
 
     `interval`은 두 원천이 함께 지원하는 주기로 제한한다.
@@ -604,7 +604,7 @@ async def _(ctx: OHLCRequest, symbols: set[str], recv: Receiver):
 
     - **모델**: 어느 원천에 붙었는지는 `ctx.quote`가 알고 있으므로, require가 원천을
       고른 것과 같은 기준으로 `cast_model()` 대상을 고른다.
-    - **심볼**: `base_of()`로 기초 자산으로 되돌린다. `SendRouter`는 발행된 데이터의
+    - **심볼**: `base_of()`로 기초 자산으로 되돌린다. `SymbolRouter`는 발행된 데이터의
       `symbol`로 구독자를 찾으므로, 거래소 표기 그대로 내보내면 어떤 구독자에게도
       전달되지 않는다. 오류 없이 조용히 사라진다.
     """

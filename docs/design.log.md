@@ -6,7 +6,7 @@
 
 ## 1. 목적과 범위
 
-프로젝트 전반(`domain.py`, `helper.py`, 그리고 이 코어를 쓰는 바깥 앱)에서 공통으로 쓸 로그 모듈이다.
+프로젝트 전반(`domain.py`, `tasks.py`, 그리고 이 코어를 쓰는 바깥 앱)에서 공통으로 쓸 로그 모듈이다.
 콘솔 출력·파일 저장·로그서버 전송 세 가지 목적지를 **같은 클래스, 같은 메서드**로 다루고, 목적지별
 켜고 끄기·레벨은 `setting.toml`의 `[log]` 카테고리로 정한다.
 
@@ -21,7 +21,7 @@
 
 **비목표 (이번 설계에서 다루지 않음)**
 - 로그서버 자체의 구현(수신·저장·조회). 이 문서는 클라이언트 쪽 `ServerSink`의 확장 지점만 정의한다.
-- 기존 `helper.py`/`domain.py`의 `print` 호출을 이 로그 모듈로 교체하는 작업(별도 과제).
+- 기존 `tasks.py`/`domain.py`의 `print` 호출을 이 로그 모듈로 교체하는 작업(별도 과제).
 - 메트릭·트레이싱 등 로그 이외의 관측성(observability) 기능.
 
 ## 2. 공개 API (`src/trading_core/logger.py`)
@@ -60,7 +60,7 @@ def shutdown() -> None: ...
 ```python
 log = get_logger(__name__)   # trading_core 내부: "trading_core.domain" / 바깥 앱: "myapp.strategy"
 log.info("구독 갱신", symbol="BTC", union_size=3)
-log.error("바인더 콜백 실패", exc_info=True, req_id=req.get_model_inst_id())
+log.error("바인더 콜백 실패", exc_info=True, req_id=req.get_model_uid())
 ```
 
 `TrLogger.debug/info/warning/error/critical(msg, /, *, exc_info=False, **fields)`는 내부적으로
@@ -183,6 +183,12 @@ log.error("바인더 콜백 실패", exc_info=True, req_id=req.get_model_inst_id
   구분되게 한다.
 - **`instance_id`** — `f"{service}@{host}:{pid}"` 조합 문자열. 로그서버 쪽에서 필터·그룹핑 키로
   바로 쓰기 편하도록 미리 만들어 둔다.
+
+`get_identity()`가 이 네 값을 돌려준다. 구성 전이면 설정에서 `service_name`만 읽어 계산하고
+구성하지는 않는다. 모델의 기본 인스턴스 ID(`model.get_instance_id()`)가 이 `instance_id`에 6자리
+무작위 꼬리를 붙여 쓰므로(`trader-kr-01@ip-10-0-1-23:48213:3fa9c1`), 로그 레코드와 모델의 uid·
+`created_by`를 앞부분으로 이어 볼 수 있다. 꼬리는 재시작한 프로세스가 pid를 물려받아도 uid가
+겹치지 않게 한다.
 
 ## 6. `setting.toml` `[log]` 스키마
 
@@ -311,5 +317,5 @@ max_buffer = 10000      # 초과분은 오래된 것부터 버리고, 버려진 
 ## 11. 미결 사항
 
 - 로그서버 프로토콜(HTTP? WebSocket? UDP?) — `ServerSink`가 실제로 구현될 때 정한다.
-- 기존 `helper.py`/`domain.py`의 `print` 호출을 이 모듈로 교체할지, 한다면 시점은 언제인지.
+- 기존 `tasks.py`/`domain.py`의 `print` 호출을 이 모듈로 교체할지, 한다면 시점은 언제인지.
 - 민감 정보(요청 필드 등)를 로그에 남길 때 마스킹이 필요한지 — 지금은 다루지 않는다.

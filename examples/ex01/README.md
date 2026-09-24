@@ -1,6 +1,6 @@
-# ex01: `Domain.request()`로 데이터 스트림 구독하기
+# ex01: `Domain.stream()`으로 데이터 스트림 구독하기
 
-이 예제는 요청 모델과 심볼 집합을 `Domain.request()`에 전달하고, 반환된 비동기
+이 예제는 요청 모델과 심볼 집합을 `Domain.stream()`에 전달하고, 반환된 비동기
 스트림을 소비하는 가장 단순한 사용법을 보여준다. 스트림 소비를 중단했을 때
 제너레이터와 스테이지의 정리 콜백이 어떤 순서로 실행되는지도 확인할 수 있다.
 
@@ -26,15 +26,15 @@
 req = CountReq(start=1)
 symbols = {"BTC", "USDT", "ETH", "XRP"}
 
-async with domain.request(req, symbols) as stream:
+async with domain.stream(req, symbols) as stream:
     async for data in stream:
         log.info("수신", symbol=data.symbol, count=data.count)
         if data.count == 10:
             break
 ```
 
-`Domain.request()`는 내부적으로 출력 큐와 `Stage`를 만들고, 전달받은 심볼을
-`Stage.update()`에 등록한다. 사용자는 이 세부 과정을 다루지 않고 비동기 반복자로
+`Domain.stream()`은 내부적으로 출력 채널과 구독(`Subscription`)을 만들고, 전달받은 심볼을
+`Subscription.update()`에 등록한다. 사용자는 이 세부 과정을 다루지 않고 비동기 반복자로
 결과만 받을 수 있다.
 
 ## 두 가지 정리 시점
@@ -54,7 +54,7 @@ async with domain.request(req, symbols) as stream:
 찍힌다. 심볼 순서는 실행마다 다르다. (줄 앞의 레벨(`INFO  `)은 뺐다.)
 
 ```text
-ex01: ━━━━━━━━━━ 시작: Domain.request()로 카운트 스트림 받기 ━━━━━━━━━━
+ex01: ━━━━━━━━━━ 시작: Domain.stream()으로 카운트 스트림 받기 ━━━━━━━━━━
 ex01: 수신 {symbol=ETH, count=1}
 ...
 ex01: 수신 {symbol=XRP, count=10}

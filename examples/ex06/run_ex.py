@@ -1,6 +1,6 @@
 """합집합이 그대로일 때 재시작이 일어나지 않는지 관찰하는 ex06 실행 모듈.
 
-`Domain.stage()`를 쓰는 이유는 ex05와 같다. 구독을 열어 둔 채 다른 구독을 붙였다
+`Domain.subscribe()`를 쓰는 이유는 ex05와 같다. 구독을 열어 둔 채 다른 구독을 붙였다
 떼야 하고, 재시작 여부를 단계별로 끊어서 재야 하기 때문이다.
 """
 
@@ -123,32 +123,32 @@ async def run_ex(domain: Domain) -> None:
     recorder_b = Recorder("B")
 
     # 같은 요청(=같은 content_id)이므로 두 구독자는 하나의 파생 스테이지를 공유한다.
-    async with domain.stage(req, recorder_a) as stage_a:
+    async with domain.subscribe(req, recorder_a) as sub_a:
         before = snapshot()
         set_phase(PHASE_1)
-        await stage_a.update({"BTC"})
+        await sub_a.update({"BTC"})
         await asyncio.sleep(2)
         record_starts(PHASE_1, before)
 
-        async with domain.stage(req, recorder_b) as stage_b:
+        async with domain.subscribe(req, recorder_b) as sub_b:
             # A가 이미 구독 중인 심볼이다. 합집합은 {"BTC"} 그대로라 재시작이 없어야 한다.
             before = snapshot()
             set_phase(PHASE_2)
-            await stage_b.update({"BTC"})
+            await sub_b.update({"BTC"})
             await asyncio.sleep(2)
             record_starts(PHASE_2, before)
 
             # 여기서는 합집합이 {"BTC", "ETH"}로 넓어지므로 재시작해야 한다.
             before = snapshot()
             set_phase(PHASE_3)
-            await stage_b.update({"BTC", "ETH"})
+            await sub_b.update({"BTC", "ETH"})
             await asyncio.sleep(2)
             record_starts(PHASE_3, before)
 
             # 빈 집합은 구독 해제다. 합집합이 {"BTC"}로 좁아지므로 역시 재시작한다.
             before = snapshot()
             set_phase(PHASE_4)
-            await stage_b.update(set())
+            await sub_b.update(set())
             await asyncio.sleep(2)
             record_starts(PHASE_4, before)
 

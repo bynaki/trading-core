@@ -36,7 +36,7 @@ require는 두 가지를 더 결정한다.
 
 ## require 콜백의 두 형태
 
-`DependentModel.require`는 두 가지 형태의 콜백을 받는다. 위치 인자 개수로 구분하며,
+`DerivedRequest.require`는 두 가지 형태의 콜백을 받는다. 위치 인자 개수로 구분하며,
 요청만 받는 형태는 심볼을 그대로 흘려보내는 래퍼로 감싸진다.
 
 ```python
@@ -55,7 +55,7 @@ def ohlc_requirement(req: OHLCRequest, symbols: set[str]):
         return UpbitRequest(interval=req.interval), {f"{s}/KRW" for s in symbols}
 ```
 
-`Domain`은 파생 스테이지를 갱신할 때마다 `get_tr_require_with_symbol(symbols)`로 이
+`Domain`은 파생 스테이지를 갱신할 때마다 `resolve_upstream(symbols)`로 이
 콜백을 호출한다. 반환된 **요청**으로 상위 원천 스테이지를 만들거나 재사용하고, 반환된
 **심볼 집합**으로 그 원천을 구독한다. 아래 두 기능은 이 반환값 두 개에 각각 대응한다.
 
@@ -95,7 +95,7 @@ def ohlc_requirement(req: OHLCRequest, symbols: set[str]):
 | 하위 → 상위 | require 콜백 | `{"BTC"}` → `{"BTC/USD"}`로 바꿔 원천에 등록 |
 | 상위 → 하위 | binder의 `base_of()` | `"BTC/USD"` → `"BTC"`로 되돌려 발행 |
 
-**역변환을 빠뜨리면 데이터가 사라진다.** `SendRouter`는 발행된 데이터의 `symbol`로
+**역변환을 빠뜨리면 데이터가 사라진다.** `SymbolRouter`는 발행된 데이터의 `symbol`로
 구독자를 찾으므로, `"BTC/USD"`인 채로 내보내면 `{"BTC"}`를 구독한 소비자에게 전달되지
 않는다. 예외도 나지 않는다.
 
@@ -138,7 +138,7 @@ USD 경로는 줄임말 필드를 정규 필드로 옮겨 담고, KRW 경로는 
 
 - 원천 binder는 무한히 발행하므로 소비자가 개수를 세어 `break`해야 한다. `async with`를
   빠져나오면 구독이 정리되고, 마지막 구독이 사라지면 상위 원천 스테이지까지 함께
-  닫힌다(DEBUG로 열면 `trading_core.helper`의 태스크 취소 로그 두 줄).
+  닫힌다(DEBUG로 열면 `trading_core.tasks`의 태스크 취소 로그 두 줄).
 - 모의 데이터는 주기마다 10개뿐이라 계속 소비하면 같은 캔들이 반복된다.
 - require가 변환하는 심볼 집합은 그 시점 구독자 **전체의 합집합**이다. 따라서 같은 파생
   요청을 서로 다른 심볼 집합으로 동시에 구독해도 서로를 밀어내지 않는다. 이 동작을

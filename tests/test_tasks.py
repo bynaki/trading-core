@@ -1,4 +1,4 @@
-"""`helper.py` 명세 — digest/id 생성과 이름 기반 `TaskManager`."""
+"""`tasks.py` 명세 — 이름 기반 `TaskManager`."""
 
 from asyncio import CancelledError, Event, create_task, sleep
 from collections.abc import AsyncIterator, Coroutine
@@ -6,13 +6,8 @@ from typing import Any
 
 import pytest
 
-from trading_core.helper import (
-    TaskManager,
-    TaskManagerError,
-    generate_digest,
-    generate_id,
-    verify_module,
-)
+from trading_core.exceptions import TaskManagerError
+from trading_core.tasks import TaskManager
 
 from .support.harness import wait_until
 
@@ -63,32 +58,6 @@ def _discard(coro: Coroutine[Any, Any, None]) -> None:
     """제출에 실패한 코루틴을 닫는다(never-awaited 경고 방지)."""
 
     coro.close()
-
-
-# ===== digest / id =====
-
-
-def test_generate_digest_is_deterministic():
-    """같은 입력은 항상 같은 digest를, 다른 입력은 다른 digest를 낸다."""
-
-    assert generate_digest("a") == generate_digest("a")
-    assert generate_digest("a") != generate_digest("b")
-    assert len(generate_digest("a")) == 16
-    assert len(generate_digest("a", 8)) == 8
-
-
-def test_generate_id_is_random_with_requested_length():
-    """`generate_id()`는 요청한 길이의 서로 다른 값을 낸다."""
-
-    assert len(generate_id()) == 16
-    assert len(generate_id(8)) == 8
-    assert generate_id() != generate_id()
-
-
-def test_verify_module_returns_defining_module():
-    """`verify_module()`은 객체가 정의된 모듈을 돌려준다."""
-
-    assert verify_module(TaskManager).__name__ == "trading_core.helper"
 
 
 # ===== 제출 =====
@@ -218,7 +187,7 @@ async def test_task_failure_callback_receives_exception(manager: TaskManager):
     async def on_failure(exc: Exception, name: str) -> None:
         failures.append((exc, name))
 
-    manager.on_task_failure(on_failure)
+    manager.set_failure_callback(on_failure)
     await manager.start()
     await manager.submit(signal.fail(), "failing")
     await wait_until(lambda: bool(failures), "실패 콜백이 호출되지 않았다.")
@@ -235,6 +204,6 @@ async def test_failed_task_releases_its_name(manager: TaskManager):
     await manager.start()
     await manager.submit(first.fail(), "reused")
     await wait_until(first.started.is_set, "첫 태스크가 시작되지 않았다.")
-    await wait_until(lambda: manager.submit_count == 0, "실패한 태스크가 정리되지 않았다.")
+    await wait_until(lambda: manager.live_count == 0, "실패한 태스크가 정리되지 않았다.")
     await manager.submit(second.once(), "reused")
     await wait_until(second.finished.is_set, "재제출한 태스크가 실행되지 않았다.")

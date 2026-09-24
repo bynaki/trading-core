@@ -2,7 +2,7 @@
 
 from asyncio import sleep
 
-from trading_core import DataModel, GenerateModel, initialize
+from trading_core import DataModel, SourceRequest, initialize
 from trading_core.logger import get_logger
 
 log = get_logger("ex02.origin")
@@ -48,7 +48,7 @@ cat_names = [
 ]
 
 
-class NamingAllReq(GenerateModel):
+class NamingAllReq(SourceRequest):
     """모든 이름 종류를 함께 요청하는 필드 없는 공통 원천 요청."""
 
 
@@ -67,8 +67,8 @@ class NamingAllContext:
     cxt_dict: dict[str, NamingAllReq] = {}
 
     def __init__(self, req: NamingAllReq) -> None:
-        self.content_id = req.get_tr_content_id()
-        assert not self.cxt_dict.get(req.get_tr_content_id()), (
+        self.content_id = req.tr_content_id
+        assert not self.cxt_dict.get(req.tr_content_id), (
             "중복 'content_id' 갖은 객체는 생성할수 없다. 유일해야 한다."
         )
         self.cxt_dict[self.content_id] = req

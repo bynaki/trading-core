@@ -155,6 +155,21 @@ def test_record_carries_its_origin(tmp_path: Path):
     assert rec["instance_id"] == f"trader-kr-01@{host}:{os.getpid()}"
 
 
+def test_get_identity_matches_the_records_origin(tmp_path: Path):
+    """`get_identity()`는 구성 전엔 설정만 읽어 계산하고(구성은 안 한다) 구성 뒤엔 그 값이다."""
+
+    path = file_config(tmp_path, log='service_name = "trader-kr-01"')
+    before = trlog.get_identity()
+    assert before.instance_id == f"trader-kr-01@{socket.gethostname()}:{os.getpid()}"
+    assert not trlog._state.configured
+
+    configure(path)
+    assert trlog.get_identity() is trlog._state.identity
+    get_logger("myapp").info("hello")
+    [rec] = read_records(tmp_path)
+    assert rec["instance_id"] == before.instance_id
+
+
 def test_service_name_defaults_to_the_hostname(tmp_path: Path):
     configure(file_config(tmp_path))
 

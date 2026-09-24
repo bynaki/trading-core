@@ -1,6 +1,6 @@
 """도메인 테스트가 공유하는 요청·데이터 모델과 binder 정의.
 
-`BindPack._binder_dict`는 프로세스 전역이라 **요청 타입 하나당 등록은 한 번뿐**이다.
+`BindPack._registry`는 프로세스 전역이라 **요청 타입 하나당 등록은 한 번뿐**이다.
 그래서 binder는 이 모듈에서 import 시점에 한 번만 정의하고, 테스트끼리는 `tag` 필드
 값을 달리해 서로 다른 content_id(=서로 다른 원천 스테이지)를 쓰는 방식으로 격리한다.
 같은 `tag`를 쓰는 두 테스트는 스테이지와 기록을 공유하게 되므로 주의할 것.
@@ -16,15 +16,15 @@ from dataclasses import dataclass, field
 
 from trading_core import (
     DataModel,
-    DependentModel,
-    GenerateModel,
+    DerivedRequest,
     Receiver,
-    RequestModel,
     Runnable,
+    SessionRequest,
+    SourceRequest,
     cast_model,
     initialize,
 )
-from trading_core.model import BaseReqModel
+from trading_core.model import BaseRequest
 
 EMIT_INTERVAL = 0.01
 """테스트용 발행 간격. 예제(0.5초)보다 훨씬 짧게 잡아 테스트를 빠르게 끝낸다."""
@@ -62,16 +62,16 @@ class StreamLog:
 _logs: defaultdict[str, StreamLog] = defaultdict(StreamLog)
 
 
-def log_of(req: BaseReqModel) -> StreamLog:
+def log_of(req: BaseRequest) -> StreamLog:
     """요청의 content_id에 대응하는 기록을 돌려준다."""
 
-    return _logs[req.get_tr_content_id()]
+    return _logs[req.tr_content_id]
 
 
 class StreamContext:
     """init 콜백이 만들어 스테이지 수명 동안 공유되는 컨텍스트."""
 
-    def __init__(self, req: BaseReqModel) -> None:
+    def __init__(self, req: BaseRequest) -> None:
         self.req = req
         self.log = log_of(req)
         self.log.inits += 1
@@ -80,7 +80,7 @@ class StreamContext:
 # ===== 원천 제너레이터 =====
 
 
-class CounterReq(GenerateModel):
+class CounterReq(SourceRequest):
     """`tag`로 원천 스테이지를 구분하는 카운트 요청."""
 
     tag: str
@@ -126,7 +126,7 @@ async def _(ctx: StreamContext):
 # ===== 심볼을 그대로 중계하는 파생 제너레이터 =====
 
 
-class DerivedReq(DependentModel):
+class DerivedReq(DerivedRequest):
     """같은 `tag`의 `CounterReq`를 상위로 요구하는 파생 요청."""
 
     tag: str
@@ -176,7 +176,7 @@ async def _(ctx: StreamContext):
 # ===== 심볼까지 변환하는 파생 제너레이터 =====
 
 
-class MappedReq(DependentModel):
+class MappedReq(DerivedRequest):
     """하위 심볼(`BTC`)을 상위 표기(`BTC/USD`)로 바꿔 요구하는 파생 요청."""
 
     tag: str
@@ -218,15 +218,15 @@ async def _(ctx: StreamContext):
     ctx.log.detached += 1
 
 
-# ===== instanter(RequestModel) 스트림 =====
+# ===== 세션(SessionRequest) 스트림 =====
 #
-# `RequestModel`은 심볼마다 `Sequence`를 만들어 상위 원천에 붙이는 요청이다. 상위에
-# 등록되는 심볼은 시퀀스가 요구한 표기(`BTC/USD`)이고 소비자가 받는 심볼은 하위
+# `SessionRequest`는 심볼마다 `Pipeline`을 만들어 상위 원천에 붙이는 요청이다. 상위에
+# 등록되는 심볼은 파이프라인이 요구한 표기(`BTC/USD`)이고 소비자가 받는 심볼은 하위
 # 표기(`BTC`)다. 이 둘을 **일부러 다르게** 두어야 상·하위를 뒤바꾼 회귀가 드러난다.
 
 
-class SwingReq(RequestModel):
-    """하위 `BTC`를 상위 `BTC/USD`로 바꿔 요구하는 요청형 모델."""
+class SwingReq(SessionRequest):
+    """하위 `BTC`를 상위 `BTC/USD`로 바꿔 요구하는 세션 요청."""
 
     tag: str
 
@@ -249,14 +249,14 @@ class Relay(Runnable):
 
 @initialize
 def swing(req: SwingReq) -> StreamContext:
-    """요청형 스테이지의 공유 컨텍스트를 만든다."""
+    """세션 스테이지의 컨텍스트를 만든다."""
 
     return StreamContext(req)
 
 
 @swing
 async def _(ctx: StreamContext, symbol: str):
-    """심볼 하나를 상위 표기로 바꿔 구독하는 시퀀스를 낸다."""
+    """심볼 하나를 상위 표기로 바꿔 구독하는 파이프라인을 낸다."""
 
     tag = cast_model(ctx.req, SwingReq).tag
     yield CounterReq(tag=tag)(f"{symbol}{QUOTE_SUFFIX}") | Relay(symbol)
@@ -276,36 +276,36 @@ async def _(ctx: StreamContext):
     ctx.log.detached += 1
 
 
-# ===== require까지 쓰는 instanter 스트림 =====
+# ===== always까지 쓰는 세션 스트림 =====
 
 BEACON_SYMBOL = "BEACON/USD"
 """`BeaconReq`가 구독 심볼과 무관하게 항상 상위에 올리는 심볼."""
 
 
-class BeaconReq(RequestModel):
-    """구독 심볼과 별개로 상위 심볼 하나를 늘 요구하는 요청형 모델."""
+class BeaconReq(SessionRequest):
+    """구독 심볼과 별개로 상위 심볼 하나를 늘 요구하는 세션 요청."""
 
     tag: str
 
 
 @initialize
 def beacon(req: BeaconReq) -> StreamContext:
-    """require를 쓰는 요청형 스테이지의 공유 컨텍스트를 만든다."""
+    """always를 쓰는 세션 스테이지의 컨텍스트를 만든다."""
 
     return StreamContext(req)
 
 
 @beacon
 async def _(ctx: StreamContext, symbol: str):
-    """`SwingReq`와 같은 방식으로 심볼별 시퀀스를 낸다."""
+    """`SwingReq`와 같은 방식으로 심볼별 파이프라인을 낸다."""
 
     tag = cast_model(ctx.req, BeaconReq).tag
     yield CounterReq(tag=tag)(f"{symbol}{QUOTE_SUFFIX}") | Relay(symbol)
 
 
-@beacon.require
+@beacon.always
 async def _(ctx: StreamContext):
-    """구독 심볼이 무엇이든 항상 붙는 시퀀스."""
+    """구독 심볼이 무엇이든 항상 붙는 파이프라인."""
 
     tag = cast_model(ctx.req, BeaconReq).tag
     yield CounterReq(tag=tag)(BEACON_SYMBOL) | Relay(BEACON_SYMBOL)
@@ -318,11 +318,11 @@ async def _(ctx: StreamContext, symbol: str):
     ctx.log.unbound.append(symbol)
 
 
-# ===== 심볼마다 다른 상위를 드는 instanter 스트림 =====
+# ===== 심볼마다 다른 상위를 드는 세션 스트림 =====
 
 
-class SplitReq(RequestModel):
-    """심볼마다 **서로 다른** 상위 요청(`split_upstream()`)에 붙는 요청형 모델.
+class SplitReq(SessionRequest):
+    """심볼마다 **서로 다른** 상위 요청(`split_upstream()`)에 붙는 세션 요청.
 
     심볼 하나가 빠지면 그 심볼만 쓰던 상위 요청이 통째로 쓰이지 않게 된다.
     """
@@ -338,14 +338,14 @@ def split_upstream(tag: str, symbol: str) -> CounterReq:
 
 @initialize
 def split(req: SplitReq) -> StreamContext:
-    """심볼별 상위를 쓰는 요청형 스테이지의 공유 컨텍스트를 만든다."""
+    """심볼별 상위를 쓰는 세션 스테이지의 컨텍스트를 만든다."""
 
     return StreamContext(req)
 
 
 @split
 async def _(ctx: StreamContext, symbol: str):
-    """심볼마다 전용 상위 요청을 구독하는 시퀀스를 낸다."""
+    """심볼마다 전용 상위 요청을 구독하는 파이프라인을 낸다."""
 
     tag = cast_model(ctx.req, SplitReq).tag
     yield split_upstream(tag, symbol)(f"{symbol}{QUOTE_SUFFIX}") | Relay(symbol)
@@ -354,7 +354,7 @@ async def _(ctx: StreamContext, symbol: str):
 # ===== binder가 없는 요청 =====
 
 
-class UnboundReq(GenerateModel):
+class UnboundReq(SourceRequest):
     """일부러 binder를 등록하지 않은 요청. `DomainError` 검증에 쓴다."""
 
     tag: str

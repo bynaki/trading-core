@@ -1,4 +1,4 @@
-"""두 `Stage`가 공유하는 원천 심볼 합집합을 관찰하는 실행 모듈."""
+"""두 구독이 공유하는 원천 심볼 합집합을 관찰하는 실행 모듈."""
 
 from asyncio import gather, run, sleep
 from pathlib import Path
@@ -24,46 +24,46 @@ class TestSender:
         self.tag = tag
 
     async def __call__(self, data: PriceData) -> None:
-        """스테이지가 라우팅한 가격 데이터를 어느 스테이지가 받았는지와 함께 남긴다."""
+        """라우팅된 가격 데이터를 어느 구독이 받았는지와 함께 남긴다."""
 
         log.info(f"수신 {self.tag}", symbol=data.symbol, price=data.price)
 
 
 async def run_ex(domain: Domain) -> None:
-    """두 스테이지에서 심볼을 갱신하며 원천의 합집합을 검증한다."""
+    """두 구독에서 심볼을 갱신하며 원천의 합집합을 검증한다."""
 
-    log.info("━━━━━━━━━━ 시작: Domain.stage()로 구독 심볼 직접 갱신하기 ━━━━━━━━━━")
+    log.info("━━━━━━━━━━ 시작: Domain.subscribe()로 구독 심볼 직접 갱신하기 ━━━━━━━━━━")
     req = PriceReq(ohlc="close")
-    content_id = req.get_tr_content_id()
+    content_id = req.tr_content_id
 
     async def _(symbol_name: str, length: int) -> None:
-        """개별 스테이지의 심볼을 추가·제거하며 원천 포함 관계를 확인한다."""
+        """개별 구독의 심볼을 추가·제거하며 원천 포함 관계를 확인한다."""
 
         sender = TestSender(symbol_name)
-        async with domain.stage(req, sender) as stage:
+        async with domain.subscribe(req, sender) as sub:
             i = 0
             symbols: set[str] = set()
             for i in range(length):
                 symbols.add(f"{symbol_name}-{i + 1}")
-                await stage.update(symbols)
-                origin = domain.get_origin_stage(content_id)
+                await sub.update(symbols)
+                shared = domain.get_shared_symbols(content_id)
                 log.info(
                     f"심볼 추가 {symbol_name}",
                     symbols=sorted(symbols),
-                    origin=sorted(origin.output.symbols),
+                    shared=sorted(shared),
                 )
-                assert (symbols & origin.output.symbols) == symbols
+                assert symbols <= shared
                 await sleep(0.5)
             for j in range(i, 0, -1):
                 symbols.remove(f"{symbol_name}-{j + 1}")
-                await stage.update(symbols)
-                origin = domain.get_origin_stage(content_id)
+                await sub.update(symbols)
+                shared = domain.get_shared_symbols(content_id)
                 log.info(
                     f"심볼 제거 {symbol_name}",
                     symbols=sorted(symbols),
-                    origin=sorted(origin.output.symbols),
+                    shared=sorted(shared),
                 )
-                assert (symbols & origin.output.symbols) == symbols
+                assert symbols <= shared
                 await sleep(0.5)
 
     await gather(_("symbols01", 3), _("symbols02", 5))

@@ -1,9 +1,9 @@
-"""`RequestModel`(instanter) 경로로 원천 틱에서 변동폭을 계산하는 예제.
+"""`SessionRequest`(세션 요청) 경로로 원천 틱에서 변동폭을 계산하는 예제.
 
-ex01~ex06의 요청은 "심볼 집합 하나 → generator 하나"였다. `RequestModel`은 다르다.
-**심볼마다 슬롯 하나**를 만들고, 각 슬롯이 `Sequence`로 상위 원천에 붙는다. 이 예제의
+ex01~ex06의 요청은 "심볼 집합 하나 → generator 하나"였다. `SessionRequest`는 다르다.
+**심볼마다 슬롯 하나**를 만들고, 각 슬롯이 `Pipeline`으로 상위 원천에 붙는다. 이 예제의
 `SwingReq`는 하위 심볼 `"BTC"` 하나마다 상위 원천 `TickReq`의 `"BTC/USD"`를 구독하는
-시퀀스를 만들고, 그 사이에 `SwingRunnable`을 끼워 직전 가격과의 차이를 계산한다.
+파이프라인을 만들고, 그 사이에 `SwingRunnable`을 끼워 직전 가격과의 차이를 계산한다.
 
 핵심은 **상위 표기와 하위 표기가 다르다**는 것이다.
 
@@ -11,7 +11,7 @@ ex01~ex06의 요청은 "심볼 집합 하나 → generator 하나"였다. `Reque
 - 하위 표기 — 소비자가 구독한 심볼(`"BTC"`). bind 콜백이 인자로 받는 값이다.
 
 `SwingReq(quote="USD")`를 `{"BTC"}`로 구독하면 상위에는 `"BTC/USD"`가 올라가고 소비자는
-`"BTC"`로 받는다. 이 변환을 시퀀스가 담당한다.
+`"BTC"`로 받는다. 이 변환을 파이프라인이 담당한다.
 """
 
 from asyncio import sleep
@@ -19,8 +19,8 @@ from typing import Literal
 
 from pydantic import BaseModel
 
-from trading_core import DataModel, GenerateModel, initialize
-from trading_core.model import RequestModel, Runnable
+from trading_core import DataModel, SourceRequest, initialize
+from trading_core.model import Runnable, SessionRequest
 
 INIT_PRICE_DICT: dict[str, float] = {
     "BTC/USD": 100,
@@ -35,7 +35,7 @@ INIT_PRICE_DICT: dict[str, float] = {
 type QuoteType = Literal["USD", "KRW"]
 
 
-class TickReq(GenerateModel):
+class TickReq(SourceRequest):
     """상위 원천 요청. 필드가 없으므로 모든 소비자가 하나의 원천을 공유한다."""
 
 
@@ -63,7 +63,7 @@ async def _(ctx: TickCtx, symbols: set[str]):
     """구독 심볼을 돌며 가격을 1씩 올려 발행한다.
 
     여기서 받는 `symbols`는 **상위 표기**의 합집합이다(`{"BTC/USD", ...}`).
-    시퀀스가 요구한 심볼이 그대로 올라오므로 `current_price_dict`의 키와 맞는다.
+    파이프라인이 요구한 심볼이 그대로 올라오므로 `current_price_dict`의 키와 맞는다.
     """
 
     while True:
@@ -73,7 +73,7 @@ async def _(ctx: TickCtx, symbols: set[str]):
             await sleep(0.5)
 
 
-class SwingReq(RequestModel):
+class SwingReq(SessionRequest):
     """견적 통화를 골라 변동폭을 요청한다.
 
     `quote`는 `content_id`에 들어가므로 `quote="USD"`와 `quote="KRW"`는 서로 다른
@@ -92,20 +92,20 @@ class SwingData(DataModel):
 
 
 class SwingCtx(BaseModel):
-    """요청형 스테이지가 공유하는 컨텍스트."""
+    """세션 스테이지의 컨텍스트."""
 
     quote: QuoteType
 
 
 @initialize
 def swing(req: SwingReq):
-    """요청형 스테이지의 공유 컨텍스트를 만든다. 견적 통화를 기억해 둔다."""
+    """세션 스테이지의 컨텍스트를 만든다. 견적 통화를 기억해 둔다."""
 
     return SwingCtx(quote=req.quote)
 
 
 class SwingRunnable(Runnable):
-    """직전 가격과의 차이를 계산하는 시퀀스 단계.
+    """직전 가격과의 차이를 계산하는 파이프라인 단계.
 
     **심볼마다 별개의 인스턴스**가 만들어지므로 `active_price`를 안전하게 들고 있을 수
     있다. 슬롯이 심볼 단위라는 점이 여기서 드러난다.
@@ -136,7 +136,7 @@ class SwingRunnable(Runnable):
 
 @swing
 async def _(ctx: SwingCtx, symbol: str):
-    """하위 심볼 하나를 상위 표기로 바꿔 구독하는 시퀀스를 낸다.
+    """하위 심볼 하나를 상위 표기로 바꿔 구독하는 파이프라인을 낸다.
 
     `symbol`은 소비자가 구독한 하위 표기(`"BTC"`)이고, `TickReq()(...)`에 넘기는
     `f"{symbol}/{ctx.quote}"`가 상위 표기(`"BTC/USD"`)다. `|`로 이어 붙인 `Runnable`이
@@ -145,5 +145,5 @@ async def _(ctx: SwingCtx, symbol: str):
     이 콜백은 심볼이 새로 구독될 때마다 한 번씩 불린다.
     """
 
-    seq = TickReq()(f"{symbol}/{ctx.quote}") | SwingRunnable(ctx.quote, symbol)
-    yield seq
+    pipeline = TickReq()(f"{symbol}/{ctx.quote}") | SwingRunnable(ctx.quote, symbol)
+    yield pipeline

@@ -3,9 +3,9 @@
 from typing import Literal
 
 from trading_core import (
-    ClosedConnection,
+    ChannelClosed,
     DataModel,
-    DependentModel,
+    DerivedRequest,
     Receiver,
     cast_model,
     initialize,
@@ -21,7 +21,7 @@ log = get_logger("ex02.refer")
 """파생 binder의 로거."""
 
 
-class NamingReq(DependentModel):
+class NamingReq(DerivedRequest):
     """원천 데이터에서 선택할 이름 종류를 지정하는 파생 요청."""
 
     kind: Literal["flower", "dog", "cat"]
@@ -46,8 +46,8 @@ class NamingContext:
     cxt_dict: dict[str, NamingReq] = {}
 
     def __init__(self, req: NamingReq) -> None:
-        self.content_id = req.get_tr_content_id()
-        assert not self.cxt_dict.get(req.get_tr_content_id()), (
+        self.content_id = req.tr_content_id
+        assert not self.cxt_dict.get(req.tr_content_id), (
             "중복 'content_id' 갖은 객체는 생성되지 않는다. 유일하다."
         )
         self.cxt_dict[self.content_id] = req
@@ -92,7 +92,7 @@ async def _(ctx: NamingContext, symbols: set[str], recv: Receiver):
                 yield NamingData(symbol=d.symbol, name=f"{d.cat} - cat")
             else:
                 raise Exception("있을수 없는일!!")
-    except ClosedConnection as e:
+    except ChannelClosed as e:
         log.info("Receiver 닫힘", kind=ctx.req_model.kind, reason=str(e))
 
 

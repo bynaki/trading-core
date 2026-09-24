@@ -69,7 +69,7 @@ ValueError: could not convert string to float: '??'
 …Z INFO  [ex09-local@<host>:<pid>] ex09.run_ex: 구독 끝 {received=6}
 INFO  ex09.run_ex: ----- logs/ex09.jsonl 에서 instance_id=ex09-local@<host>:<pid> 인 레코드 22건 -----
 INFO  ex09.run_ex: 레벨별 {INFO=12, DEBUG=8, ERROR=1, WARNING=1}
-INFO  ex09.run_ex: 로거별 {ex09.run_ex=8, ex09.ex09=12, trading_core.helper=2}
+INFO  ex09.run_ex: 로거별 {ex09.run_ex=8, ex09.ex09=12, trading_core.tasks=2}
 INFO  ex09.run_ex: 태스크별 {Task-1=12, PriceFeedReq@ex09.ex09:…:2=10}
 ```
 
@@ -79,7 +79,7 @@ INFO  ex09.run_ex: 태스크별 {Task-1=12, PriceFeedReq@ex09.ex09:…:2=10}
 ## 관전 포인트
 
 **콘솔에 없는 DEBUG 8건이 파일에는 있다.** `log.debug("틱 발행", ...)` 6건은 콘솔(INFO)에서는
-걸러지고 파일(DEBUG)로만 간다. 나머지 2건은 `trading_core.helper`(`TaskManager`)의 태스크 제출·취소
+걸러지고 파일(DEBUG)로만 간다. 나머지 2건은 `trading_core.tasks`(`TaskManager`)의 태스크 제출·취소
 로그다 — 라이브러리 내부 로그도 같은 설정을 따른다. 호출은 하나, 목적지별 on/off와 레벨은 설정만 정한다.
 레코드는 루트 레벨(`[log].level`)과 싱크 레벨을 **둘 다** 넘어야 그 싱크로 나간다.
 
@@ -95,7 +95,7 @@ INFO  ex09.run_ex: 태스크별 {Task-1=12, PriceFeedReq@ex09.ex09:…:2=10}
 **`task`가 로그가 어느 태스크에서 나왔는지 알려 준다.** generator 본문의 로그(구독 시작·틱
 발행·파싱 실패·급변 감지 9건)와 그 태스크의 취소 로그 1건은 `TaskManager`가 스테이지 id로 이름
 붙인 태스크(`PriceFeedReq@…:2`)에서 나왔다. 나머지 12건은 메인 태스크(`Task-1`)다 — 소비자 쪽
-로그 8건과 태스크 제출 로그에 더해, init 콜백(`피드 연결`)은 `domain.request()`를 부른 쪽에서,
+로그 8건과 태스크 제출 로그에 더해, init 콜백(`피드 연결`)은 `domain.stream()`을 부른 쪽에서,
 `finally`(`구독 정리`)와 detach(`피드 종료`)는 구독을 끊은 쪽에서 돌기 때문이다. 같은 binder 코드라도 어느 지점이 어느
 태스크에서 도는지가 이 필드로 드러난다.
 
