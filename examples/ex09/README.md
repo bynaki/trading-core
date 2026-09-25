@@ -5,7 +5,7 @@ binder와 소비자 코드에서 `trading_core.logger`로 로그를 남기고, �
 (`instance_id`)로 걸러 읽어, 여러 서버의 로그가 모인 곳에서 한 프로세스의 로그만 고르는 법도
 보인다.
 
-설계는 `docs/design.log.md`, 모든 설정 키의 설명은 저장소 루트의 `setting.example.toml`에 있다.
+설계는 `docs/log.spec.md`, 모든 설정 키의 설명은 저장소 루트의 `setting.example.toml`에 있다.
 
 ## 파일 구성
 

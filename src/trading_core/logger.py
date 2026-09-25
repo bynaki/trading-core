@@ -1,6 +1,6 @@
 """프로젝트 전반에서 쓰는 로그 모듈.
 
-설계는 `docs/design.log.md`에 있다. 요약하면:
+설계는 `docs/log.spec.md`에 있다. 요약하면:
 
 - `get_logger(__name__)`으로 로거를 얻어 `log.info("메시지", key=value)`처럼 **동기**로 부른다.
   호출은 큐에 넣고 곧바로 반환하며, 실제 출력은 `QueueListener`의 전용 스레드가 맡는다.

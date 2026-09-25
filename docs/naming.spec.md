@@ -1,6 +1,6 @@
 # 이름 정리
 
-모듈·클래스·메서드·변수·타입 이름을 목적과 의미에 맞게 바꾼 내역이다. `docs/DONE.md`의
+모듈·클래스·메서드·변수·타입 이름을 목적과 의미에 맞게 바꾼 내역이다. `docs/done.md`의
 `naming:rename` 항목이 이 문서를 가리킨다. 3절의 1~33번을 **모두 적용했다.** 적용하면서 계획과
 달라진 점은 7절에 있다. 옛 이름에서 새 이름을 찾을 때 이 문서를 본다.
 
@@ -145,7 +145,7 @@ A~C절은 공개 계약과 직렬화 형식이라 먼저 확정한다. D~G절은
 ## 5. 적용 절차
 
 - 공개 이름(`__init__.__all__`)을 바꾸면 함께 고친다: `examples/*`와 각 README, `tests/*`,
-  `AGENTS.md`(아키텍처·테스트 표·저장소 메모), `docs/TODO.md`.
+  `AGENTS.md`(아키텍처·테스트 표·저장소 메모), `docs/plan.md`.
 - 찾기: `grep -rn '<옛이름>' src tests examples docs AGENTS.md README.md`. 문자열 리터럴(`"instanter"`,
   `"__require__"`)과 예외 메시지·docstring 안의 이름도 빠뜨리지 않는다.
 - 8번은 이름만 바꾸는 게 아니라 반환값도 바뀐다. ex03·ex08과 `tests/test_domain.py`의 사용처를 함께

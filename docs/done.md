@@ -1,8 +1,8 @@
-# DONE
+# Done
 
-> `docs/TODO.md`에서 완료되고, 남은 열린 과제와 관련이 없어진 항목을 여기로 옮긴다. 새 세션은
+> `docs/plan.md`에서 완료되고, 남은 열린 과제와 관련이 없어진 항목을 여기로 옮긴다. 새 세션은
 > 이 파일을 매번 읽지 않는다 — 과거 결함·설계 결정의 내력이 필요할 때만 찾아본다. 형식은
-> `docs/TODO.md`와 같다(`AGENTS.md` "새 세션을 시작할 때" 참고).
+> `docs/plan.md`와 같다(`AGENTS.md` "새 세션을 시작할 때" 참고).
 
 ### [done] domain:dependent-union-share
 같은 파생 요청을 서로 다른 심볼 집합으로 동시에 구독하면 먼저 구독한 쪽이 데이터를 전혀 받지
@@ -87,7 +87,7 @@ instanter 슬롯이 닫힐 때 공유된 상위 generator가 죽을 수 있던 �
 스테이지, ex08)가 계속 구독 중이면 합집합이 그대로라 재시작되지 않고, 그 소비자는 영영 데이터를
 못 받는다. domain:instanter-resubscribe 이전부터 있던 경합이다(재현 시나리오 기준 약 절반 확률).
 닫힌 슬롯은 받을 소비자가 없으므로 `SequenceSender`가 `ClosedConnection`을 삼키도록 했다. 일반적인
-"Sender 하나의 실패가 공유 generator를 죽인다"는 문제는 policy:callback-exception(`docs/TODO.md`)에
+"Sender 하나의 실패가 공유 generator를 죽인다"는 문제는 policy:callback-exception(`docs/plan.md`)에
 남는다.
 재현·검증: tests/test_transport.py의 `test_sequence_sender_drops_data_for_a_closed_slot`(경합이라
 통합 테스트 대신 단위로 고정).
@@ -96,7 +96,7 @@ instanter 슬롯이 닫힐 때 공유된 상위 generator가 죽을 수 있던 �
 기존 `print`를 로그 모듈로 옮겼다. `helper.py`의 `TaskManager`(`[TASK SUBMIT]` 등 진단, 여러 곳)와
 `domain.py`의 `SendRouter.__call__`에 있던 경고 한 줄("Sender가 없다")이 대상이었다.
 `helper.py`·`domain.py`는 각각 모듈 상단에서 `get_logger(__name__)`으로 로거를 얻는다(순환 임포트
-없음, `docs/design.log.md` "비목표" 참고). 정한 레벨: `TaskManager`의 제출·완료·취소·예외 훅은 모두
+없음, `docs/log.spec.md` "비목표" 참고). 정한 레벨: `TaskManager`의 제출·완료·취소·예외 훅은 모두
 DEBUG(진단), `SendRouter`의 "Sender가 없다"는 WARNING. `on_task_exception`은 `exc_info=exc`로 예외
 정보를 함께 싣는다.
 재현·검증: `uv run examples/main.py serial` — ex09 로그 요약(`로거별`)에 `trading_core.helper`
@@ -120,7 +120,7 @@ DEBUG(진단), `SendRouter`의 "Sender가 없다"는 WARNING. `on_task_exception
 
 ### [done] naming:rename
 모듈·클래스·메서드·변수·타입 이름을 목적과 의미에 맞게 바꿨다. 1~33번 전부 적용했고, 목록과
-적용하며 달라진 점은 `docs/design.naming.md`에 있다. 요청 3종이 `SourceRequest`/`DerivedRequest`/
+적용하며 달라진 점은 `docs/naming.spec.md`에 있다. 요청 3종이 `SourceRequest`/`DerivedRequest`/
 `SessionRequest`가 되고, `Domain`의 공개 API가 `subscribe()`/`stream()`/`Subscription`/
 `get_shared_symbols()`로 바뀌었다. 직렬화 형식(모델 타입 리터럴, `tr_annotation`의 `uid`·`created_by`
 키)도 바뀌었으므로 옛 형식으로 저장한 덤프는 `load_model()`로 되살릴 수 없다.

@@ -13,17 +13,17 @@ WebSocket 클라이언트가 아니라, 실시간 스트림을 다룰 때 반복
 
 ## 새 세션을 시작할 때
 
-- 이 파일 다음으로 **`docs/TODO.md`**(세션을 넘어 남는 백로그)를 읽는다. 새로 안 것·남긴 후속
-  작업은 `TODO.md`에 적는다.
+- 이 파일 다음으로 **`docs/plan.md`**(세션을 넘어 남는 백로그)를 읽는다. 새로 안 것·남긴 후속
+  작업은 `plan.md`에 적는다.
 - **`docs/HANDOFF.md`는 있을 때만 읽는다.** 직전 세션이 멈춘 곳을 넘기는 일회성 문서라 평소엔 없다.
   이어받아 끝내면 지운다.
-- `TODO.md` 항목은 `### [done] <prefix>:<word>` 제목 아래 내용을 적는다. `<prefix>:<word>`
+- `plan.md` 항목은 `### [done] <prefix>:<word>` 제목 아래 내용을 적는다. `<prefix>:<word>`
   (예: `logger:server-transport`)가 항목 구분자이자 태그이고, 같은 `prefix`는 같은 주제다.
-- 할 일을 마치면 그 자리에서 제목에 `[done]`만 붙인다. `docs/DONE.md`로 옮기는 것은 커밋 때다
+- 할 일을 마치면 그 자리에서 제목에 `[done]`만 붙인다. `docs/done.md`로 옮기는 것은 커밋 때다
   (아래 "코드 규약"의 커밋 절차).
-- `docs/DONE.md`는 열린 항목과 더 이상 관련 없는 완료 항목의 아카이브다. 매번 읽지 않고, 내력이
+- `docs/done.md`는 열린 항목과 더 이상 관련 없는 완료 항목의 아카이브다. 매번 읽지 않고, 내력이
   필요할 때 태그로 찾아본다.
-- `HANDOFF.md`·`TODO.md`에는 **git 상태를 적지 않는다**(커밋 해시, 앞선 커밋 수, 원격·PR·병합
+- `HANDOFF.md`·`plan.md`에는 **git 상태를 적지 않는다**(커밋 해시, 앞선 커밋 수, 원격·PR·병합
   여부). 적는 순간 틀린 말이 된다. `git status`·`git log`로 확인한다.
 
 ## 환경
@@ -63,8 +63,8 @@ uv run examples/main.py parallel      # 모든 예제를 공유 Domain에서 동
 - `README.md`는 **의도적으로 얇다** — 소개·설치·예제 실행법·범위와 한계만 둔다. API가 아직
   자리 잡는 중이라 **코드 예제와 API 이름을 넣지 않는다.** 사용법은 실행되는 `examples/`가 맡는다.
 - 예제를 고치면 같은 디렉터리의 README도 함께 고친다.
-- 운영·설계 문서는 `docs/`에 있다: `TODO.md`, `DONE.md`, `design.log.md`(로그 모듈 설계),
-  `design.naming.md`(이름 정리 내역), 있을 때만 `HANDOFF.md`.
+- 운영·설계 문서는 `docs/`에 있다: `plan.md`, `done.md`, `log.spec.md`(로그 모듈 설계),
+  `naming.spec.md`(이름 정리 내역), 있을 때만 `HANDOFF.md`.
 - 예제는 ex01~ex09. ex06은 파생 스테이지의 "합집합이 그대로면 재시작 안 함", ex07·ex08은
   세션 요청(ex08은 세션 스테이지가 content_id로 공유되지 **않음**), ex09는 로그 모듈이다.
 - 예제 출력은 모두 `trading_core.logger`로 남긴다(`print` 없음). 공용 설정은
@@ -237,7 +237,7 @@ DEBUG 로그를 남긴다.
 - 런타임 의존성은 pydantic 하나뿐이다. 새 런타임 의존성을 추가하기 전에 확인할 것.
 - 커밋 메시지는 Conventional Commits(`feat:`, `fix:`, `docs:`)를 쓴다.
 - **커밋은 사용자가 요청하고 승인했을 때만 한다.** 절차는 프로젝트 스킬
-  `.claude/skills/commit/SKILL.md`(`/commit`)를 따른다: TODO→DONE 이관 → 개인정보·보안 검사 →
+  `.claude/skills/commit/SKILL.md`(`/commit`)를 따른다: plan→done 이관 → 개인정보·보안 검사 →
   보고·승인 → 커밋. 스킬을 쓸 수 없는 에이전트도 이 파일을 읽고 같은 순서를 지킨다.
 - `async for x in cb(...): yield x`로 async generator를 감쌀 때는 `contextlib.aclosing`으로 감싼다.
   안 그러면 바깥을 `aclose()`해도 **안쪽 generator의 `finally`가 돌지 않는다.**
