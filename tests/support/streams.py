@@ -351,6 +351,248 @@ async def _(ctx: StreamContext, symbol: str):
     yield split_upstream(tag, symbol)(f"{symbol}{QUOTE_SUFFIX}") | Relay(symbol)
 
 
+# ===== 실패를 주입하는 스트림 =====
+#
+# 코어는 재시도하지 않고 실패를 `StageFailed`로 알린다. 아래 binder는 그 경로를 시험하려고
+# 일부러 던진다. 원천이 던지는 시점은 `trip()`으로 정해 경합 없이 재현한다.
+
+
+class InjectedFailure(RuntimeError):
+    """테스트 binder가 일부러 던지는 예외."""
+
+
+_tripped: set[str] = set()
+
+
+def trip(tag: str) -> None:
+    """`tag`의 `FlakyReq` 원천이 다음 바퀴에 한 번 던지게 한다."""
+
+    _tripped.add(tag)
+
+
+class FlakyReq(SourceRequest):
+    """`trip(tag)`되면 한 번 던지는 원천 요청. 그 전까지는 `CounterReq`처럼 발행한다."""
+
+    tag: str
+    detach_raises: bool = False
+
+
+@initialize
+def flaky(req: FlakyReq) -> StreamContext:
+    """끊기는 원천의 공유 컨텍스트를 만든다."""
+
+    return StreamContext(req)
+
+
+@flaky
+async def _(ctx: StreamContext, symbols: set[str]):
+    """카운트를 발행하다가 `trip()`되면 던진다."""
+
+    tag = cast_model(ctx.req, FlakyReq).tag
+    ctx.log.starts.append(frozenset(symbols))
+    count = 0
+    try:
+        while True:
+            if tag in _tripped:
+                _tripped.discard(tag)
+                raise InjectedFailure(f"원천이 끊겼다. - {tag}")
+            for symbol in sorted(symbols):
+                yield CounterData(symbol=symbol, count=count)
+            count += 1
+            await sleep(EMIT_INTERVAL)
+    finally:
+        ctx.log.stopped += 1
+
+
+@flaky.detached
+async def _(ctx: StreamContext):
+    """마지막 구독이 사라지거나 스테이지가 실패할 때 호출된다. 설정에 따라 던진다."""
+
+    ctx.log.detached += 1
+    if cast_model(ctx.req, FlakyReq).detach_raises:
+        raise InjectedFailure("detach 콜백이 실패했다.")
+
+
+class FlakyDerivedReq(DerivedRequest):
+    """같은 `tag`의 `FlakyReq`를 상위로 요구하는 파생 요청."""
+
+    tag: str
+
+
+@FlakyDerivedReq.require
+def _(req: FlakyDerivedReq) -> FlakyReq:
+    return FlakyReq(tag=req.tag)
+
+
+@initialize
+def flaky_derived(req: FlakyDerivedReq) -> StreamContext:
+    """끊기는 원천 위의 파생 스테이지 컨텍스트를 만든다."""
+
+    return StreamContext(req)
+
+
+@flaky_derived
+async def _(ctx: StreamContext, symbols: set[str], recv: Receiver):
+    """상위 데이터를 받아 구독 중인 심볼만 흘려보낸다."""
+
+    ctx.log.starts.append(frozenset(symbols))
+    try:
+        while True:
+            data = cast_model(await recv(), CounterData)
+            if data.symbol in symbols:
+                yield DerivedData(symbol=data.symbol, count=data.count)
+    finally:
+        ctx.log.stopped += 1
+
+
+@flaky_derived.detached
+async def _(ctx: StreamContext):
+    ctx.log.detached += 1
+
+
+class BrokenDerivedReq(DerivedRequest):
+    """상위 데이터를 받자마자 던지는 파생 요청. 상위는 같은 `tag`의 `CounterReq`다."""
+
+    tag: str
+
+
+@BrokenDerivedReq.require
+def _(req: BrokenDerivedReq) -> CounterReq:
+    return CounterReq(tag=req.tag)
+
+
+@initialize
+def broken_derived(req: BrokenDerivedReq) -> StreamContext:
+    """계산이 실패하는 파생 스테이지의 컨텍스트를 만든다."""
+
+    return StreamContext(req)
+
+
+@broken_derived
+async def _(ctx: StreamContext, symbols: set[str], recv: Receiver):
+    """첫 상위 데이터에서 던진다(계산 버그를 흉내 낸다)."""
+
+    ctx.log.starts.append(frozenset(symbols))
+    try:
+        await recv()
+        raise InjectedFailure("파생 계산이 실패했다.")
+        yield  # async generator로 만든다
+    finally:
+        ctx.log.stopped += 1
+
+
+@broken_derived.detached
+async def _(ctx: StreamContext):
+    ctx.log.detached += 1
+
+
+class Explode(Runnable):
+    """받는 족족 던지는 파이프라인 단계."""
+
+    async def invoke(self, input: CounterData) -> SwingData | None:
+        raise InjectedFailure("파이프라인이 실패했다.")
+
+
+class FragileReq(SessionRequest):
+    """`SwingReq`처럼 `BTC`를 `BTC/USD`로 구독하되, 지정한 심볼에서 실패하는 세션 요청.
+
+    `failing` 심볼은 파이프라인이 던지고, `bind_fails` 심볼은 bind 콜백이 던진다.
+    """
+
+    tag: str
+    failing: str = ""
+    bind_fails: str = ""
+
+
+@initialize
+def fragile(req: FragileReq) -> StreamContext:
+    """실패를 주입하는 세션 스테이지의 컨텍스트를 만든다."""
+
+    return StreamContext(req)
+
+
+@fragile
+async def _(ctx: StreamContext, symbol: str):
+    """심볼 하나의 파이프라인을 낸다. 설정한 심볼이면 던지거나 던지는 단계를 붙인다."""
+
+    req = cast_model(ctx.req, FragileReq)
+    if symbol == req.bind_fails:
+        raise InjectedFailure(f"bind 콜백이 실패했다. - {symbol}")
+    step = Explode() if symbol == req.failing else Relay(symbol)
+    yield CounterReq(tag=req.tag)(f"{symbol}{QUOTE_SUFFIX}") | step
+
+
+@fragile.unbind
+async def _(ctx: StreamContext, symbol: str):
+    ctx.log.unbound.append(symbol)
+
+
+@fragile.detached
+async def _(ctx: StreamContext):
+    ctx.log.detached += 1
+
+
+class FlakySplitReq(SessionRequest):
+    """심볼마다 전용 `FlakyReq`(`flaky_upstream()`)에 붙는 세션 요청."""
+
+    tag: str
+
+
+def flaky_upstream(tag: str, symbol: str) -> FlakyReq:
+    """`FlakySplitReq`의 심볼 `symbol`이 붙는 상위 요청. `trip(f"{tag}:{symbol}")`로 끊는다."""
+
+    return FlakyReq(tag=f"{tag}:{symbol}")
+
+
+@initialize
+def flaky_split(req: FlakySplitReq) -> StreamContext:
+    """심볼별로 끊기는 상위를 쓰는 세션 스테이지의 컨텍스트를 만든다."""
+
+    return StreamContext(req)
+
+
+@flaky_split
+async def _(ctx: StreamContext, symbol: str):
+    tag = cast_model(ctx.req, FlakySplitReq).tag
+    yield flaky_upstream(tag, symbol)(f"{symbol}{QUOTE_SUFFIX}") | Relay(symbol)
+
+
+@flaky_split.unbind
+async def _(ctx: StreamContext, symbol: str):
+    ctx.log.unbound.append(symbol)
+
+
+class StubbornReq(SessionRequest):
+    """정리 콜백(`unbind`·`detach`)이 기록을 남긴 뒤 던지는 세션 요청."""
+
+    tag: str
+
+
+@initialize
+def stubborn(req: StubbornReq) -> StreamContext:
+    """정리가 실패하는 세션 스테이지의 컨텍스트를 만든다."""
+
+    return StreamContext(req)
+
+
+@stubborn
+async def _(ctx: StreamContext, symbol: str):
+    tag = cast_model(ctx.req, StubbornReq).tag
+    yield CounterReq(tag=tag)(f"{symbol}{QUOTE_SUFFIX}") | Relay(symbol)
+
+
+@stubborn.unbind
+async def _(ctx: StreamContext, symbol: str):
+    ctx.log.unbound.append(symbol)
+    raise InjectedFailure(f"unbind 콜백이 실패했다. - {symbol}")
+
+
+@stubborn.detached
+async def _(ctx: StreamContext):
+    ctx.log.detached += 1
+    raise InjectedFailure("detach 콜백이 실패했다.")
+
+
 # ===== binder가 없는 요청 =====
 
 

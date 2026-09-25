@@ -4,32 +4,57 @@
 곧 같은 공유 스테이지와 같은 기록(`log_of`)을 뜻한다.
 """
 
+from asyncio import timeout
 from typing import Any, cast
 
 import pytest
 
-from trading_core import Domain, DomainError, Subscription, cast_model, get_model_uid
+from trading_core import (
+    Domain,
+    DomainError,
+    StageFailed,
+    Subscription,
+    cast_model,
+    get_model_uid,
+)
+from trading_core.model import BaseRequest
 
-from .support.harness import BlockingRecorder, Recorder, wait_until
+from .support.harness import (
+    DEFAULT_TIMEOUT,
+    BlockingRecorder,
+    FailingRecorder,
+    Failures,
+    Recorder,
+    wait_until,
+)
 from .support.streams import (
     BEACON_SYMBOL,
     QUOTE_SUFFIX,
     BeaconReq,
+    BrokenDerivedReq,
     CounterData,
     CounterReq,
     DerivedData,
     DerivedReq,
+    FlakyDerivedReq,
+    FlakyReq,
+    FlakySplitReq,
+    FragileReq,
+    InjectedFailure,
     MappedReq,
     SplitReq,
+    StubbornReq,
     SwingData,
     SwingReq,
     UnboundReq,
+    flaky_upstream,
     log_of,
     split_upstream,
+    trip,
 )
 
 
-def shared_symbols(domain: Domain, req: CounterReq | DerivedReq | MappedReq) -> set[str]:
+def shared_symbols(domain: Domain, req: BaseRequest) -> set[str]:
     """요청의 공유 스테이지가 현재 들고 있는 심볼 합집합. 공유 중이 아니면 빈 집합이다."""
 
     return domain.get_shared_symbols(req.tr_content_id)
@@ -585,6 +610,253 @@ async def test_equal_session_requests_do_not_share_a_stage(domain: Domain):
     assert log.unbound == ["BTC", "BTC"]
     assert log.detached == 2
     assert up_log.detached == 1
+
+
+# ===== 실패 정책 =====
+#
+# 코어는 재시도하지 않는다. 실패한 스테이지·슬롯을 내리고 영향받은 소비자에게 자기 심볼만
+# 담은 `StageFailed`를 알린다. 정리 콜백의 실패는 정리를 끝까지 한 뒤 로그로만 남긴다.
+
+
+async def test_source_failure_is_not_retried_and_notifies_every_downstream(domain: Domain):
+    """원천이 던지면 다시 세우지 않고, 원천 소비자와 그 위의 파생 소비자 모두에게 알린다.
+
+    각 소비자는 **자기가 구독한 심볼만** 받는다. 파생 소비자의 실패는 원천의 실패에서
+    연쇄된 것이므로 `__cause__`가 원천의 `StageFailed`다.
+    """
+
+    tag = "fail-source-cascade"
+    source, derived = FlakyReq(tag=tag), FlakyDerivedReq(tag=tag)
+    source_rec, derived_rec = Recorder("source"), Recorder("derived")
+    source_fail, derived_fail = Failures(), Failures()
+
+    async with (
+        domain.subscribe(source, source_rec, source_fail) as source_sub,
+        domain.subscribe(derived, derived_rec, derived_fail) as derived_sub,
+    ):
+        await source_sub.update({"BTC"})
+        await derived_sub.update({"ETH"})
+        await source_rec.wait_for(1)
+        await derived_rec.wait_for(1)
+
+        trip(tag)
+        await source_fail.wait_for(1)
+        await derived_fail.wait_for(1)
+
+        assert source_fail.received[0].content_id == source.tr_content_id
+        assert source_fail.symbols == {"BTC"}
+        assert isinstance(source_fail.received[0].__cause__, InjectedFailure)
+        assert derived_fail.received[0].content_id == derived.tr_content_id
+        assert derived_fail.symbols == {"ETH"}
+        upstream_failed = derived_fail.received[0].__cause__
+        assert isinstance(upstream_failed, StageFailed)
+        assert upstream_failed.content_id == source.tr_content_id
+
+        assert shared_symbols(domain, source) == set()
+        assert shared_symbols(domain, derived) == set()
+        assert (log_of(source).inits, log_of(source).detached) == (1, 1)  # 재시도 없음
+        assert (log_of(derived).inits, log_of(derived).detached) == (1, 1)
+
+    assert log_of(source).inits == 1  # 실패한 구독을 끊어도 스테이지를 되살리지 않는다
+
+
+async def test_resubscribing_after_failure_creates_a_new_stage(domain: Domain):
+    """실패한 심볼은 구독에서 빠진다. `update()`로 다시 넣으면 새 스테이지가 init부터 선다."""
+
+    tag = "fail-resubscribe"
+    req = FlakyReq(tag=tag)
+    log = log_of(req)
+    recorder, failures = Recorder(), Failures()
+
+    async with domain.subscribe(req, recorder, failures) as sub:
+        await sub.update({"BTC"})
+        await recorder.wait_for(1)
+        trip(tag)
+        await failures.wait_for(1)
+        assert shared_symbols(domain, req) == set()
+
+        await sub.update({"BTC"})
+        recorder.clear()
+        await recorder.wait_for(1)
+        assert shared_symbols(domain, req) == {"BTC"}
+        assert log.inits == 2
+
+    assert log.detached == 2
+
+
+async def test_failing_sender_does_not_stop_other_consumers(domain: Domain):
+    """소비자 하나의 `Sender`가 던져도 공유 generator와 다른 소비자는 계속 돈다.
+
+    던진 소비자만 라우터에서 빠지고 그 소비자에게만 알린다. 합집합이 그대로이므로
+    generator는 재시작하지 않는다.
+    """
+
+    tag = "fail-sender"
+    req = CounterReq(tag=tag)
+    log = log_of(req)
+    good, bad = Recorder("good"), FailingRecorder("bad")
+    good_fail, bad_fail = Failures(), Failures()
+
+    async with (
+        domain.subscribe(req, good, good_fail) as good_sub,
+        domain.subscribe(req, bad, bad_fail) as bad_sub,
+    ):
+        await good_sub.update({"BTC"})
+        await bad_sub.update({"BTC"})
+        await bad_fail.wait_for(1)
+        assert bad_fail.symbols == {"BTC"}
+
+        good.clear()
+        await good.wait_for(3)
+        assert bad.count == 1  # 뗀 뒤로는 받지 않는다
+        assert good_fail.received == []
+        assert log.inits == 1
+        assert log.starts == [frozenset({"BTC"})]
+
+
+async def test_derived_failure_releases_upstream(domain: Domain):
+    """파생 계산이 던지면 재시도 없이 파생 스테이지를 내리고 상위 등록도 푼다."""
+
+    tag = "fail-derived"
+    req = BrokenDerivedReq(tag=tag)
+    upstream = CounterReq(tag=tag)
+    failures = Failures()
+
+    async with domain.subscribe(req, Recorder(), failures) as sub:
+        await sub.update({"BTC"})
+        await failures.wait_for(1)
+
+        assert failures.symbols == {"BTC"}
+        assert shared_symbols(domain, req) == set()
+        assert shared_symbols(domain, upstream) == set()
+        assert (log_of(req).inits, log_of(req).detached) == (1, 1)
+        assert log_of(upstream).detached == 1
+
+
+async def test_shared_detach_callback_failure_does_not_break_update(domain: Domain):
+    """detach 콜백이 던져도 `update()`는 예외 없이 끝나고 스테이지는 정리된다."""
+
+    tag = "fail-shared-detach"
+    req = FlakyReq(tag=tag, detach_raises=True)
+    log = log_of(req)
+    recorder = Recorder()
+
+    async with domain.subscribe(req, recorder) as sub:
+        await sub.update({"BTC"})
+        await recorder.wait_for(1)
+        await sub.update(set())  # detach 콜백이 던진다
+        assert log.detached == 1
+        assert shared_symbols(domain, req) == set()
+
+        await sub.update({"BTC"})
+        assert log.inits == 2
+        await sub.update(set())
+
+
+async def test_session_slot_failure_fails_only_that_symbol(domain: Domain):
+    """파이프라인이 던지면 그 슬롯(하위 표기 심볼)만 실패하고 나머지 심볼은 계속 돈다."""
+
+    tag = "fail-session-slot"
+    req = FragileReq(tag=tag, failing="BTC")
+    log = log_of(req)
+    recorder, failures = Recorder(), Failures()
+
+    async with domain.subscribe(req, recorder, failures) as sub:
+        await sub.update({"BTC", "ETH"})
+        await failures.wait_for(1)
+
+        assert failures.received[0].content_id == req.tr_content_id
+        assert failures.symbols == {"BTC"}  # 상위 표기(`BTC/USD`)가 아니다
+        assert log.unbound == ["BTC"]
+        assert shared_symbols(domain, CounterReq(tag=tag)) == {f"ETH{QUOTE_SUFFIX}"}
+
+        recorder.clear()
+        await recorder.wait_for(3)
+        assert recorder.symbols == {"ETH"}
+
+    assert log.unbound == ["BTC", "ETH"]
+
+
+async def test_session_bind_failure_fails_only_that_symbol(domain: Domain):
+    """bind 콜백이 던진 심볼만 실패로 알린다. bind되지 않았으므로 unbind도 하지 않는다."""
+
+    tag = "fail-session-bind"
+    req = FragileReq(tag=tag, bind_fails="BTC")
+    log = log_of(req)
+    recorder, failures = Recorder(), Failures()
+
+    async with domain.subscribe(req, recorder, failures) as sub:
+        await sub.update({"BTC", "ETH"})
+        assert failures.symbols == {"BTC"}  # `update()`가 돌아올 때 이미 알렸다
+
+        await recorder.wait_for(2)
+        assert recorder.symbols == {"ETH"}
+
+    assert log.unbound == ["ETH"]
+
+
+async def test_session_upstream_failure_fails_the_slots_using_it(domain: Domain):
+    """상위 하나가 실패하면 그 상위를 쓰던 슬롯의 심볼만 실패한다.
+
+    상위의 실패는 상위 표기(`BTC/USD`)로 오고, 소비자에게는 슬롯 키인 하위 표기(`BTC`)로 알린다.
+    """
+
+    tag = "fail-session-upstream"
+    req = FlakySplitReq(tag=tag)
+    log = log_of(req)
+    recorder, failures = Recorder(), Failures()
+
+    async with domain.subscribe(req, recorder, failures) as sub:
+        await sub.update({"BTC", "ETH"})
+        await wait_until(lambda: recorder.symbols == {"BTC", "ETH"})
+
+        trip(f"{tag}:BTC")
+        await failures.wait_for(1)
+        assert failures.symbols == {"BTC"}
+        assert log.unbound == ["BTC"]
+
+        recorder.clear()
+        await recorder.wait_for(3)
+        assert recorder.symbols == {"ETH"}
+        assert shared_symbols(domain, flaky_upstream(tag, "ETH")) == {f"ETH{QUOTE_SUFFIX}"}
+
+
+async def test_cleanup_callback_failure_does_not_break_detach(domain: Domain):
+    """unbind·detach 콜백이 던져도 `detach()`는 끝까지 정리하고 예외를 올리지 않는다.
+
+    `TaskGroup`으로 돌리면 하나가 던질 때 형제 콜백이 취소되고, 그 뒤의 상위 해제·detach
+    콜백·끊긴 구독 표시가 모두 건너뛰어진다.
+    """
+
+    tag = "fail-session-cleanup"
+    req = StubbornReq(tag=tag)
+    log = log_of(req)
+    recorder = Recorder()
+
+    async with domain.subscribe(req, recorder) as sub:
+        await sub.update({"BTC", "ETH"})
+        await wait_until(lambda: recorder.symbols == {"BTC", "ETH"})
+
+    assert sorted(log.unbound) == ["BTC", "ETH"]
+    assert log.detached == 1
+    assert shared_symbols(domain, CounterReq(tag=tag)) == set()
+    with pytest.raises(DomainError):
+        await sub.update({"BTC"})
+
+
+async def test_stream_raises_stage_failed(domain: Domain):
+    """`stream()`은 구독이 실패하면 `StageFailed`를 던지고 끝난다."""
+
+    tag = "fail-stream"
+    req = FlakyReq(tag=tag)
+
+    with pytest.raises(StageFailed) as info:
+        async with timeout(DEFAULT_TIMEOUT), domain.stream(req, {"BTC"}) as gen:
+            async for _ in gen:
+                trip(tag)
+
+    assert info.value.symbols == {"BTC"}
+    assert log_of(req).detached == 1
 
 
 # ===== 생성 가드 =====

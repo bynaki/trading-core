@@ -3,7 +3,7 @@
 from asyncio import Event, sleep, timeout
 from collections.abc import Callable
 
-from trading_core import DataModel
+from trading_core import DataModel, StageFailed
 
 POLL_INTERVAL = 0.005
 """`wait_until()`이 조건을 다시 확인하는 간격."""
@@ -82,3 +82,36 @@ class BlockingRecorder(Recorder):
         """막아 둔 전송을 모두 풀고, 이후 전송도 막지 않는다."""
 
         self._released.set()
+
+
+class FailingRecorder(Recorder):
+    """받은 것을 기록한 뒤 던지는 `Sender` — 고장 난 소비자를 흉내 낸다."""
+
+    async def __call__(self, data: DataModel) -> None:
+        self.received.append(data)
+        raise RuntimeError("소비자가 실패했다.")
+
+
+class Failures:
+    """`on_error`로 받은 `StageFailed`를 모아 두는 콜백."""
+
+    def __init__(self) -> None:
+        self.received: list[StageFailed] = []
+
+    async def __call__(self, failed: StageFailed) -> None:
+        self.received.append(failed)
+
+    @property
+    def symbols(self) -> set[str]:
+        """지금까지 실패로 알려진 심볼 전체."""
+
+        return {symbol for failed in self.received for symbol in failed.symbols}
+
+    async def wait_for(self, count: int = 1, timeout_sec: float = DEFAULT_TIMEOUT) -> None:
+        """실패 통지가 `count`건 올 때까지 기다린다."""
+
+        await wait_until(
+            lambda: len(self.received) >= count,
+            f"실패 통지 {count}건을 받지 못했다. (현재 {len(self.received)}건)",
+            timeout_sec,
+        )

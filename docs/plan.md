@@ -5,28 +5,43 @@
 > 열린 항목과 관련이 없어진 것은 `docs/done.md`로 옮기고 여기서 지운다(상세 규칙은 `AGENTS.md`
 > "새 세션을 시작할 때" 참고).
 
-> 열린 과제는 policy:callback-exception과 logger:server-transport다.
+> 열린 과제는 logger:server-transport, policy:symbol-failure(보류), policy:init-failure다.
 
-### policy:callback-exception
-TaskManager: task에서 예외가 발생했을 때 TaskManager 단에서 처리할 방법이 없다. 사용자 콜백
-(`unbind_cb`·`detach_cb`)이 `TaskGroup` 안에서 던지면 `detach()`가 중간에 끊겨 상위 스테이지가
-안 내려가고 `sub.update`/`detach` 교체도 안 된다. generate 콜백의 `finally`도 같은 노출을 갖는다.
-정책이 **사용자 결정 대기** 중이므로 임의로 구현하지 말 것.
+### [done] policy:callback-exception
+사용자 콜백·generator·Sender가 던질 때의 정책을 정하고 구현했다. 전에는 원천·파생 generator가 던지면
+`_pump` 태스크만 조용히 죽어(DEBUG 로그) 스테이지가 `active_symbols`를 든 채 남았고, 합집합이 같으면
+재시작도 안 돼 소비자와 하위 파생·세션이 영영 굶었다. Sender 하나가 던지면 `SymbolRouter`의 `TaskGroup`을
+거쳐 공유 generator가 죽었고, 세션 `invoke()`가 던지면 슬롯 채널이 안 닫혀 상위가 계속 쌓였다.
+`unbind_cb`·`detach_cb`가 던지면 `detach()`가 중간에 끊기고 형제 콜백까지 취소됐다.
 
-사용자에게 제시한 선택지:
-1. 로그만 남기고 계속 — 정리는 항상 끝나지만 오류를 놓치기 쉽다.
-2. **정리를 끝까지 한 뒤 모은 오류를 `ExceptionGroup`으로 재발생** (추천) — 정리 보장 + 호출자도
-   오류를 본다. 현재 `TaskGroup` 스타일과 맞는다. 덧붙여 `SymbolRouter`에서 Sender 하나의 실패를
-   격리해 공유 generator가 죽지 않게 한다.
-3. 스테이지별 실패 콜백 — 가장 유연하지만 API가 늘어난다.
+정한 정책(`AGENTS.md` 핵심 불변식 7·8):
+- **코어는 재시도하지 않는다**(원천 포함). 재시도를 단계마다 두면 요청이 여러 단계를 거칠 때 곱해진다.
+  버틸지(재연결 등)는 binder가 generator 안에서 정한다.
+- **실패 단위는 (content_id, 심볼 부분집합)**. 스테이지·슬롯을 내리고 영향받은 소비자에게 자기 심볼만
+  담은 `StageFailed`(직렬화할 수 있게 `cause`는 문자열)를 `subscribe(..., on_error=)`로 알린다. 원천
+  실패는 하위 파생·세션 슬롯으로 연쇄한다. 세션은 슬롯(하위 표기 심볼) 단위, `always` 슬롯 실패만 세션
+  전체. 실패한 심볼은 구독에서 빠지고 `update()`로 다시 넣으면 새 스테이지가 init부터 선다.
+- **Sender 하나의 실패는 격리**: 그 Sender만 떼고 공유 generator는 계속.
+- **정리 실패는 삼킨다**: 끝까지 정리하고 ERROR 로그. 호출자에게 올리지 않는다(`ExceptionGroup`으로
+  올리는 안도 검토했으나, 정리는 구독을 연 쪽이 아니라 스테이지 쪽 일이라 호출자가 다룰 수 없다).
+- `stream()`은 실패하면 `StageFailed`를 던지고 끝난다.
+- 곁들여 고친 것: `open_slot()`이 bind 콜백을 다 받은 뒤에만 슬롯을 등록(도중 실패 시 부분 상태 없음),
+  빈 집합 `update()`가 스테이지를 새로 만들지 않음, 빠진 스테이지로 락을 기다리던 `update()`는 지금
+  등록된 스테이지로 넘김, generator 수명을 `pump()`의 `aclosing` 안으로 옮김, 원천·파생 스테이지 생성을
+  `_get_or_create_shared_stage()` 하나로 합침, `TaskManager` 예외 훅을 ERROR로.
+재현·검증: tests/test_domain.py의 "실패 정책" 절, tests/test_routing.py의
+`test_symbol_router_isolates_a_failing_sender`. 수정을 하나씩 되돌리면 해당 테스트만 깨지는 것을 확인했다.
+남은 것은 아래 policy:symbol-failure, policy:init-failure로 남겨 두었다.
 
-손댈 자리(`src/trading_core/`):
-- `domain.py` `_create_session_subscription()`의 `unbind_symbols()`·`detach()` — 콜백이 던지면 `detach()`가
-  중간에 끊긴다.
-- `domain.py` 공유 스테이지 `update()`들의 detach 콜백 호출, generate 콜백의 `finally`.
-- `routing.py` `SymbolRouter.__call__` — `TaskGroup` 안에서 Sender 하나가 던지면 전체가 실패.
-- `domain.py` `_run_pipeline_slot()` — `pipeline.invoke()`가 던지면 슬롯 태스크가 조용히 죽는다.
-- `tasks.py` `TaskManager._task_wrapper()` / `set_failure_callback()` — 현재 태스크 예외 처리 지점.
+### policy:symbol-failure
+원천이 **심볼 하나만** 실패로 알리는 길이 없다(보류). 원천 generator는 심볼 합집합 하나로 돌므로, 한
+소비자가 넣은 잘못된 심볼(상장 폐지 등) 때문에 binder가 던지면 같은 원천을 쓰는 모든 소비자가 실패한다.
+지금은 binder가 그런 심볼을 던지지 말고 건너뛰도록 해야 한다. 필요해지면 binder가 "`X`는 못 준다"를
+알리고 코어가 스테이지를 죽이지 않은 채 `StageFailed(symbols={X})`만 내보내는 API를 둔다.
+
+### policy:init-failure
+`init_cb`가 던질 때의 정책이 정해지지 않았다. 지금은 스테이지를 만드는 `update()`(세션은 `subscribe()`)의
+호출자에게 그대로 올라간다. 다른 실패처럼 `StageFailed`로 알릴지 정해야 한다.
 
 ### [done] logger:core
 프로젝트 전반 로그 모듈(`logger.py`). 설계는 `docs/log.spec.md`에 있다. `setting.toml`의 `[log]`

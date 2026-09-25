@@ -161,7 +161,8 @@ class TaskManager:
     # ======= hooks =======
 
     def on_task_exception(self, exc: Exception, name: str):
-        log.debug(
+        # 태스크까지 새어 나온 예외는 `Domain`이 처리하지 못한 것이다(예상 못 한 버그).
+        log.error(
             "태스크 예외",
             id=self._id,
             name=name,

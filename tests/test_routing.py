@@ -5,7 +5,7 @@ import pytest
 from trading_core import Channel, ChannelClosed
 from trading_core.routing import PipelineSender, SymbolRouter
 
-from .support.harness import Recorder
+from .support.harness import FailingRecorder, Recorder
 from .support.streams import CounterData, CounterReq, Relay
 
 # ===== Channel =====
@@ -83,6 +83,52 @@ async def test_symbol_router_drops_empty_registration():
 
     await router(CounterData(symbol="BTC", count=1))
     assert recorder.count == 0
+
+
+async def test_symbol_router_isolates_a_failing_sender():
+    """Sender 하나가 던져도 나머지는 받고, 던진 Sender만 빠지며 실패 콜백이 그 심볼로 불린다.
+
+    `TaskGroup`으로 보내면 하나가 던질 때 형제 전송이 취소되고 예외가 라우터를 부른
+    공유 generator까지 올라가 모든 소비자가 끊긴다.
+    """
+
+    router = SymbolRouter()
+    good, bad = Recorder("good"), FailingRecorder("bad")
+    failed: list[tuple[set[str], Exception]] = []
+
+    async def on_fail(symbols: set[str], exc: Exception) -> None:
+        failed.append((symbols, exc))
+
+    router.replace(good, {"BTC"})
+    router.replace(bad, {"BTC", "ETH"}, on_fail)
+
+    await router(CounterData(symbol="BTC", count=1))
+    assert good.count == 1
+    assert [symbols for symbols, _ in failed] == [{"BTC", "ETH"}]
+    assert isinstance(failed[0][1], RuntimeError)
+    assert router.symbols == {"BTC"}
+
+    await router(CounterData(symbol="BTC", count=2))
+    assert (good.count, bad.count) == (2, 1)
+
+
+async def test_symbol_router_drain_returns_each_sender_with_its_symbols():
+    """`drain()`은 센더마다 (심볼, 실패 콜백)을 돌려주고 라우터를 비운다."""
+
+    router = SymbolRouter()
+    a, b = Recorder("A"), Recorder("B")
+
+    async def on_fail(symbols: set[str], exc: Exception) -> None: ...
+
+    router.replace(a, {"BTC"}, on_fail)
+    router.replace(b, {"BTC", "ETH"})
+
+    drained = router.drain()
+    assert sorted((sorted(symbols), cb is on_fail) for symbols, cb in drained) == [
+        (["BTC"], True),
+        (["BTC", "ETH"], False),
+    ]
+    assert router.symbols == set()
 
 
 # ===== PipelineSender =====

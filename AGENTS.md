@@ -169,17 +169,29 @@ async def _(ctx: NamingAllContext): ...
 2. **심볼 합집합** — `SymbolRouter`가 (Sender, symbols)를 모아 binder에는 **합집합**만 넘기고,
    출력은 `data.symbol`을 구독한 Sender에게만 fan-out한다.
 3. **합집합이 바뀔 때만 재시작** — `current_symbols == active_symbols`면 `update()`는 즉시 반환한다.
-   달라지면 태스크를 이름으로 취소하고 `gen.aclose()` 후 새 generator를 만든다(원천·파생 한정).
+   달라지면 태스크를 이름으로 취소하고(generator는 `pump()`가 `aclosing`으로 닫는다) 새 generator를
+   만든다(원천·파생 한정).
 4. **두 개의 정리 지점** — binder의 `finally`는 구독 업데이트 단위, `@x.detached`는 스테이지 전체.
    합집합이 비면 스테이지를 dict에서 빼고 detach 콜백을 부른다.
 5. **`update(symbols)`는 교체다**(`SymbolRouter.replace()`). 빈 집합을 넘기면 그 소비자의 구독이 사라진다.
 6. **bind ↔ unbind 짝** — 세션에서 `bind_cb`로 연 심볼은 `update()`로 빠지든 `detach()`로 닫히든
    `unbind_cb`가 **정확히 한 번** 불린다(`unbind_symbols()` 공유). 슬롯 닫기(`close_slots()`)는 슬롯
    태스크의 이름 해제까지 기다린다.
+7. **실패는 재시도하지 않고 심볼 단위로 알린다** — generator(원천·파생)·파이프라인·bind 콜백·소비자
+   `Sender`가 던지면 그 스테이지나 슬롯을 내리고, 영향받은 소비자에게 **자기 심볼만** 담은
+   `StageFailed`를 `on_error`로 알린다. 원천·파생 스테이지가 실패하면 그 스테이지를 상위로 둔 파생·세션
+   슬롯으로 연쇄한다(`__cause__`가 상위의 `StageFailed`). `Sender` 하나가 던지면 그 Sender만 떼고
+   공유 generator는 계속 돈다. 실패한 심볼은 구독에서 빠지고, `update()`로 다시 넣으면 새 스테이지가
+   init부터 선다. 버틸지(재연결 등)는 binder가 generator 안에서 정한다.
+8. **정리 실패는 정리를 막지 않는다** — `detach_cb`·`unbind_cb`·binder `finally`가 던져도 나머지 정리를
+   끝까지 하고(`_run_cleanups()`, 형제를 취소하지 않는다) ERROR 로그만 남긴다. `update()`·`detach()`의
+   호출자에게 올리지 않는다. `init_cb`의 예외는 지금처럼 호출자에게 간다(`policy:init-failure`).
 
 소비 API: `Domain.stream(req, symbols)`는 async generator를 준다(`aclosing`으로 감싸 조기 `break`에도
 정리). `Domain.subscribe(req, sender)`는 호출자가 `Sender`를 주고 `sub.update(symbols)`로 심볼을
-교체하는 저수준 API다(`Subscription`을 준다). `get_shared_symbols(content_id)`는 공유 중인 스테이지의
+교체하는 저수준 API다(`Subscription`을 준다). `subscribe(req, sender, on_error)`의 `on_error`가
+`StageFailed`(`content_id`·`symbols`·`cause`)를 받는다. 없으면 ERROR 로그만 남는다. `stream()`은 테스트·예제용
+간편 API라 실패하면 `StageFailed`를 던지고 끝난다. `get_shared_symbols(content_id)`는 공유 중인 스테이지의
 심볼 합집합을 돌려준다(공유 중이 아니면 빈 집합). `Subscription`·`SharedStage`는 `_STAGE_CREATION_KEY`
 가드로 `Domain`을 통해서만 만들어진다. 공개 API는 작게 두고 내부 객체(스테이지)를 돌려주지 않는다.
 
@@ -220,14 +232,24 @@ async def _(ctx: SwingCtx):
   `_run_pipeline_slot()`이 `pipeline.invoke()`를 거쳐 소비자에게.
 - 슬롯은 상위 구독 갱신보다 먼저 닫히므로, 닫힌 슬롯으로 온 데이터의 `ChannelClosed`는
   `PipelineSender`가 삼킨다. 올려 보내면 공유된 상위 generator가 죽는다.
+- 상위가 실패하면 상위 표기로 온 `StageFailed`를 그 상위·심볼을 쓰던 슬롯 키(하위 표기)로 되돌려
+  알린다(`on_upstream_failed()`). `always` 슬롯이 실패하면 세션 구독 전체가 실패하고 컨텍스트도
+  정리해, 다음 `update()`가 init부터 다시 한다.
+
+#### 실패 처리의 락 순서
+
+스테이지 락은 **하위 → 상위** 순서로만 잡는다(하위 `update()`가 상위 `update()`를 부른다). 그래서
+실패 통지(`OnFail`)는 락을 잡지 않고 `Domain._spawn()`으로 태스크만 띄운다. 상위 락을 쥔 채 하위에
+알리면 교착한다. 실패 처리 태스크는 세대 번호(`run_seq`)로 그 사이 `update()`가 새 generator를 띄웠는지
+가려내고, 빠진 스테이지(`retired`)로 온 `update()`는 지금 등록된 스테이지로 넘긴다.
 
 ### TaskManager (tasks.py)
 
 `Domain`의 generator 루프는 모두 `TaskManager.submit(coro, name)`으로 돈다. 이름이 태스크의 정체성이고
 **대기 중에도 점유**된다. `cancel_by_name()`은 실행 중이면 취소 후 `gather`, 대기 중이면
 `_cancelled_pending`에 예약하고, 어느 쪽이든 **이름 해제까지 기다린다**(안 그러면 같은 이름 재제출이
-충돌한다). `live_count`는 끝나지 않은(대기 + 실행) 태스크 수다. 제출·완료·취소·예외 훅은 `logger.py`로
-DEBUG 로그를 남긴다.
+충돌한다). `live_count`는 끝나지 않은(대기 + 실행) 태스크 수다. 제출·완료·취소 훅은 `logger.py`로
+DEBUG 로그를, 예외 훅은 ERROR 로그를 남긴다(태스크까지 새어 나온 예외는 `Domain`이 처리하지 못한 버그다).
 
 ## 코드 규약
 
@@ -249,16 +271,16 @@ DEBUG 로그를 남긴다.
 
 | 파일 | 덮는 범위 |
 | --- | --- |
-| `tests/support/streams.py` | 테스트 전용 모델·binder(원천 · 파생 · 심볼 변환 파생 · 세션 셋)와 스테이지 사건 기록 |
-| `tests/support/harness.py` | `Recorder`(Sender 구현), 느린 소비자 `BlockingRecorder`, `wait_until()` |
+| `tests/support/streams.py` | 테스트 전용 모델·binder(원천 · 파생 · 심볼 변환 파생 · 세션 셋 · 실패 주입)와 스테이지 사건 기록 |
+| `tests/support/harness.py` | `Recorder`(Sender 구현), 느린 소비자 `BlockingRecorder`, 던지는 `FailingRecorder`, `on_error` 기록 `Failures`, `wait_until()` |
 | `tests/conftest.py` | `domain` 픽스처(시작 → 테스트 → `stop()`) |
 | `tests/test_model.py` | 식별자 3종, content_id 캐시 무효화, `load_model`·`cast_model` 왕복, `Pipeline` |
 | `tests/test_ids.py` | digest/id 생성, 정의 모듈 찾기 |
 | `tests/test_tasks.py` | `TaskManager` 이름 점유·취소·재사용·실패 콜백 |
 | `tests/test_binder.py` | `initialize()` 추론과 거부 규칙, require 두 형태, 재바인드 거부, 전역 레지스트리 |
-| `tests/test_routing.py` | `Channel`, `SymbolRouter` 라우팅·교체·해제, 닫힌 슬롯의 `PipelineSender` |
+| `tests/test_routing.py` | `Channel`, `SymbolRouter` 라우팅·교체·해제·Sender 실패 격리, 닫힌 슬롯의 `PipelineSender` |
 | `tests/test_logger.py` | 설정 탐색·검증, JSON 레코드·발신처, 싱크별 레벨, 파일 회전, 재구성·종료 |
-| `tests/test_domain.py` | content_id 단위 공유, 심볼 합집합, 재시작 조건, 두 정리 지점, 의존 스트림, 세션 |
+| `tests/test_domain.py` | content_id 단위 공유, 심볼 합집합, 재시작 조건, 두 정리 지점, 의존 스트림, 세션, 실패 정책 |
 
 잘 깨지지 않는 불변식과 그것을 덮는 테스트(고칠 때 이 테스트가 깨지는지 본다):
 
@@ -273,6 +295,10 @@ DEBUG 로그를 남긴다.
 | 안 쓰이는 상위를 떼어 냄 | `test_session_detaches_an_upstream_no_pipeline_uses` | 심볼마다 다른 상위를 드는 `SplitReq` |
 | 닫힌 슬롯이 상위를 죽이지 않음 | `test_pipeline_sender_drops_data_for_a_closed_slot` | 경합이라 단위 테스트로 고정 |
 | 세션 스테이지는 content_id로 공유 안 함 | `test_equal_session_requests_do_not_share_a_stage` | ex08 시나리오. 짝: `test_equal_requests_share_one_stage` |
+| 실패는 재시도 없이 하위 전체로 연쇄 | `test_source_failure_is_not_retried_and_notifies_every_downstream` | 원천 실패 시점은 `trip(tag)`로 정한다 |
+| Sender 하나의 실패를 격리 | `test_failing_sender_does_not_stop_other_consumers`, `test_symbol_router_isolates_a_failing_sender` | |
+| 세션 실패는 하위 표기 심볼 하나만 | `test_session_slot_failure_fails_only_that_symbol`, `test_session_upstream_failure_fails_the_slots_using_it` | 표기가 다른 요청이라야 잡힌다 |
+| 정리 콜백이 던져도 정리를 끝냄 | `test_cleanup_callback_failure_does_not_break_detach` | 형제 `unbind_cb`가 모두 불리는지까지 본다 |
 
 테스트를 쓸 때 걸리는 제약:
 
@@ -283,6 +309,9 @@ DEBUG 로그를 남긴다.
   `wait_until()`로 확인하고, 동기로 단정할 수 있는 건 `domain.get_shared_symbols()`뿐이다. 예외로 세션의
   `unbind_cb`는 `update()`가 await하므로 반환 직후 단정할 수 있다.
 - binder는 무한히 발행하므로 소비 개수나 `Recorder.wait_for()`로 끝낸다.
+- 실패 통지도 태스크로 돌아 비동기다. `Failures.wait_for()`로 기다린다. 예외로 세션 bind 콜백의 실패는
+  `update()`가 돌아올 때 이미 알려져 있다. 실패를 기다리는 테스트는 제한 시간을 둔다(`stream()` 루프 등) —
+  안 그러면 회귀가 실패가 아니라 멈춤으로 나타난다.
 - `test_logger.py`는 전역 루트 로거를 건드린다. autouse 픽스처가 CWD·환경변수를 격리하고 `shutdown()`으로
   되돌린다. 레코드는 파일 싱크를 켜고 `shutdown()`으로 큐를 비운 뒤 읽는다(리스너 스레드가 쓴다).
 - 새 불변식을 테스트로 덮었으면 **수정을 되돌려 그 테스트만 깨지는지** 확인한다.

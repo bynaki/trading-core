@@ -1,5 +1,5 @@
-from asyncio import Queue, QueueShutDown, TaskGroup
-from collections.abc import Iterator
+from asyncio import Queue, QueueShutDown, gather
+from collections.abc import Awaitable, Callable, Iterator
 from typing import NamedTuple
 
 from .exceptions import ChannelClosed, DomainError
@@ -55,11 +55,21 @@ class PipelineSender:
             pass
 
 
+type OnFail = Callable[[set[str], Exception], Awaitable[None]]
+"""구독이 실패했을 때 그 센더의 심볼과 원인을 받는 콜백.
+
+라우터는 이 콜백을 데이터를 보내던 태스크 안에서 부른다. 스테이지 락을 잡으면 하위
+`update()`(하위 락 → 상위 락)와 교착할 수 있으므로, 콜백은 할 일을 태스크로 띄우고 곧바로
+돌아와야 한다.
+"""
+
+
 class SymbolRouter:
     """(Sender, 심볼) 구독을 모아 데이터를 `data.symbol`을 구독한 Sender에게만 보낸다."""
 
     def __init__(self):
         self._senders_by_symbol: dict[str, set[Sender[DataModel]]] = {}
+        self._on_fail: dict[Sender[DataModel], OnFail] = {}
 
     def add(self, sender: Sender[DataModel], symbol: str):
         if not symbol:
@@ -68,35 +78,74 @@ class SymbolRouter:
         senders.add(sender)
 
     def remove(self, sender: Sender[DataModel], symbol: str = ""):
+        """`sender`의 `symbol` 구독을 뺀다. `symbol`이 없으면 실패 콜백까지 모두 뺀다."""
+
         if symbol:
             if senders := self._senders_by_symbol.get(symbol):
                 senders.discard(sender)
         else:
             for senders in self._senders_by_symbol.values():
                 senders.discard(sender)
+            self._on_fail.pop(sender, None)
 
-    def replace(self, sender: Sender[DataModel], symbols: set[str]):
-        """`sender`의 구독 심볼을 `symbols`로 바꾼다. 빈 집합이면 구독이 사라진다."""
+    def replace(self, sender: Sender[DataModel], symbols: set[str], on_fail: OnFail | None = None):
+        """`sender`의 구독 심볼을 `symbols`로 바꾼다. 빈 집합이면 구독이 사라진다.
+
+        `on_fail`은 이 센더의 구독이 실패했을 때 부른다(`__call__()`·`drain()`).
+        """
+
         self.remove(sender)
         for symbol in symbols:
             self.add(sender, symbol)
+        if symbols and on_fail is not None:
+            self._on_fail[sender] = on_fail
 
     def clear(self):
         self._senders_by_symbol.clear()
+        self._on_fail.clear()
+
+    def symbols_of(self, sender: Sender[DataModel]) -> set[str]:
+        """`sender`가 구독 중인 심볼."""
+
+        return {symbol for symbol, senders in self._senders_by_symbol.items() if sender in senders}
+
+    def drain(self) -> list[tuple[set[str], OnFail | None]]:
+        """센더마다 (구독 심볼, 실패 콜백)을 돌려주고 라우터를 비운다. 스테이지 실패에 쓴다."""
+
+        senders = {sender for senders in self._senders_by_symbol.values() for sender in senders}
+        drained = [(self.symbols_of(sender), self._on_fail.get(sender)) for sender in senders]
+        self.clear()
+        return [(symbols, on_fail) for symbols, on_fail in drained if symbols]
 
     async def __call__(self, data: DataModel):
-        sent = False
-        if senders := self._senders_by_symbol.get(data.symbol):
-            async with TaskGroup() as tg:
-                for sender in senders:
-                    tg.create_task(sender(data))
-                    sent = True
-        if not sent:
+        senders = list(self._senders_by_symbol.get(data.symbol, ()))
+        if not senders:
             log.warning("데이터를 전송할 Sender가 없다", symbol=data.symbol)
+            return
+        # 한 Sender의 실패가 나머지 Sender와 이 라우터를 부른 공유 generator로 번지지 않게
+        # 결과를 모아 따로 처리한다. `TaskGroup`은 하나가 던지면 형제를 취소하고 다시 던진다.
+        results = await gather(*(sender(data) for sender in senders), return_exceptions=True)
+        for sender, result in zip(senders, results, strict=True):
+            if isinstance(result, Exception):
+                await self._fail_sender(sender, result)
+            elif isinstance(result, BaseException):
+                raise result
+
+    async def _fail_sender(self, sender: Sender[DataModel], exc: Exception):
+        """던진 센더를 떼어 내고 그 센더의 실패 콜백을 부른다."""
+
+        symbols = self.symbols_of(sender)
+        on_fail = self._on_fail.get(sender)
+        self.remove(sender)
+        if on_fail is None:
+            log.error("Sender가 실패해 구독에서 뗐다", symbols=sorted(symbols), exc_info=exc)
+            return
+        await on_fail(symbols, exc)
 
     @property
     def symbols(self) -> set[str]:
         """구독자가 하나라도 있는 심볼의 합집합."""
+
         return {symbol for symbol, senders in self._senders_by_symbol.items() if senders}
 
 

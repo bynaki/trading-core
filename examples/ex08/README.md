@@ -124,18 +124,18 @@ ex08: ━━━━━━━━━━ 끝 ━━━━━━━━━━
 
 ## 어디를 검증하는가
 
-`domain.py`의 `_create_session_subscription()`다. 원천 쪽 `_get_or_create_source_stage()`와 나란히
+`domain.py`의 `_create_session_subscription()`다. 원천·파생 쪽 `_get_or_create_shared_stage()`와 나란히
 놓으면 차이가 한눈에 보인다.
 
 ```python
-def _get_or_create_source_stage(self, req: BaseRequest):
+def _get_or_create_shared_stage(self, req: BaseRequest) -> SharedStage:
     content_id = req.tr_content_id
     if stage := self._shared_stages.get(content_id):
         return stage                 # ← content_id로 재사용한다
     ...
     ctx = bind_pack.get_init_cb()(req)
 
-def _create_session_subscription(self, req: BaseRequest, sender: Sender):
+def _create_session_subscription(self, req: BaseRequest, sender: Sender, on_error):
     ...                              # ← `_shared_stages`를 보지 않는다
     ctx = bind_pack.get_init_cb()(req)   # 호출마다 새 컨텍스트
 ```
