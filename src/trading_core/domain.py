@@ -4,7 +4,7 @@ from contextlib import aclosing, asynccontextmanager
 from typing import Any
 
 from .binder import BindPack
-from .exceptions import ChannelClosed, DomainError, StageError, StageFailed
+from .exceptions import ChannelClosed, DomainError, StageFailed
 from .logger import get_logger
 from .model import (
     BaseRequest,
@@ -67,10 +67,10 @@ class Subscription[T: BaseRequest](BaseStage[T]):
 
     async def update(self, symbols: set[str]) -> None:
         """구독 심볼을 `symbols`로 바꾼다. 빈 집합이면 구독이 사라진다."""
-        raise StageError("'update()'가 구현되지 않았다.")
+        raise NotImplementedError("'update()'는 'Domain'이 채운다.")
 
     async def detach(self) -> None:
-        raise StageError("'detach()'가 구현되지 않았다.")
+        raise NotImplementedError("'detach()'는 'Domain'이 채운다.")
 
 
 class SharedStage[T: BaseRequest](BaseStage[T]):
@@ -83,11 +83,11 @@ class SharedStage[T: BaseRequest](BaseStage[T]):
     async def update(
         self, sender: Sender, symbols: set[str], on_fail: OnFail | None = None
     ) -> None:
-        raise StageError("'update()'가 구현되지 않았다.")
+        raise NotImplementedError("'update()'는 'Domain'이 채운다.")
 
     async def refresh(self) -> None:
         """라우터에서 센더가 빠졌을 때 합집합을 다시 계산해 필요하면 재시작한다."""
-        raise StageError("'refresh()'가 구현되지 않았다.")
+        raise NotImplementedError("'refresh()'는 'Domain'이 채운다.")
 
     @property
     def router(self) -> SymbolRouter:
@@ -215,14 +215,20 @@ class Domain:
         if is_source(req):
             source_cb = bind_pack.get_source_cb(req)
             if source_cb is None:
-                raise StageError(f"'source_cb'가 'bind'되지 않았다. - {get_model_id(req)}")
+                raise DomainError(
+                    f"불변 조건의 오류: 'source_cb'가 'bind'되지 않았다. - {get_model_id(req)}"
+                )
         elif is_derived(req):
             if not isinstance(req, DerivedRequest):
-                raise StageError(f"'DerivedRequest'이어야 한다. - {get_model_id(req)}")
+                raise DomainError(
+                    f"불변 조건의 오류: 'DerivedRequest'이어야 한다. - {get_model_id(req)}"
+                )
             derived_req = req
             derived_cb = bind_pack.get_derived_cb(req)
             if derived_cb is None:
-                raise StageError(f"'derived_cb'가 'bind'되지 않았다. - {get_model_id(req)}")
+                raise DomainError(
+                    f"불변 조건의 오류: 'derived_cb'가 'bind'되지 않았다. - {get_model_id(req)}"
+                )
         else:
             raise DomainError(
                 "공유 스테이지는 `SourceRequest` 이거나 `DerivedRequest` 이어야 한다."
