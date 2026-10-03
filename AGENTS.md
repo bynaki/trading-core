@@ -65,9 +65,10 @@ uv run examples/main.py parallel      # 모든 예제를 공유 Domain에서 동
 - 예제를 고치면 같은 디렉터리의 README도 함께 고친다.
 - 운영·설계 문서는 `docs/`에 있다: `plan.md`, `done.md`, `log.spec.md`(로그 모듈 설계),
   `naming.spec.md`(이름 정리 내역), 있을 때만 `HANDOFF.md`.
-- 예제는 ex01~ex11. ex06은 파생 스테이지의 "합집합이 그대로면 재시작 안 함", ex07·ex08은
+- 예제는 ex01~ex12. ex06은 파생 스테이지의 "합집합이 그대로면 재시작 안 함", ex07·ex08은
   세션 요청(ex08은 세션 스테이지가 content_id로 공유되지 **않음**), ex09는 로그 모듈, ex10은
-  콜백이 던질 때의 실패 정책(`StageFailed`·`on_error`), ex11은 init 콜백이 던질 때다.
+  콜백이 던질 때의 실패 정책(`StageFailed`·`on_error`), ex11은 init 콜백이 던질 때, ex12는
+  binder가 심볼 하나를 거부할 때(`SymbolRejected`)다.
 - 예제 출력은 모두 `trading_core.logger`로 남긴다(`print` 없음). 공용 설정은
   `examples/setting.toml`이고 `main.py`와 각 `run_ex.py`의 `main()`이 `configure()`한다. 로거
   이름은 `__name__`이 아니라 `"ex05.origin"`처럼 직접 준다 — 직접 실행하면 `__main__`이 되어 어느
@@ -186,6 +187,10 @@ async def _(ctx: NamingAllContext): ...
    공유 generator는 계속 돈다. 실패한 심볼은 구독에서 빠지고, `update()`로 다시 넣으면 새 스테이지가
    init부터 선다. 버틸지(재연결 등)는 binder가 generator 안에서 정한다. 세션도 공유 스테이지처럼
    init을 첫 `update()`에서 한다. binder 누락 같은 등록 오류(`DomainError`)는 지금처럼 호출자에게 간다.
+   원천·파생 generator가 `SymbolRejected(symbols)`를 던지면 스테이지를 내리지 않고 그 심볼만 구독에서
+   빼 알리고, 남은 심볼로 다시 띄운다(`fail_symbols()`). 파생은 상위의 실패 심볼을 하위 심볼로
+   되돌려(`fail_upstream_symbols()`, 하위 심볼마다 `resolve_upstream({s})`) 그것만 뺀다. 구독되지 않은
+   심볼만 거부하면 같은 합집합으로 끝없이 다시 띄우지 않도록 스테이지 전체의 실패로 본다.
 8. **정리 실패는 정리를 막지 않는다** — `detach_cb`·`unbind_cb`·binder `finally`가 던져도 나머지 정리를
    끝까지 하고(`_run_cleanups()`, 형제를 취소하지 않는다) ERROR 로그만 남긴다. `update()`·`detach()`의
    호출자에게 올리지 않는다.
@@ -302,6 +307,8 @@ DEBUG 로그를, 예외 훅은 ERROR 로그를 남긴다(태스크까지 새어 
 | Sender 하나의 실패를 격리 | `test_failing_sender_does_not_stop_other_consumers`, `test_symbol_router_isolates_a_failing_sender` | |
 | 세션 실패는 하위 표기 심볼 하나만 | `test_session_slot_failure_fails_only_that_symbol`, `test_session_upstream_failure_fails_the_slots_using_it` | 표기가 다른 요청이라야 잡힌다 |
 | 정리 콜백이 던져도 정리를 끝냄 | `test_cleanup_callback_failure_does_not_break_detach` | 형제 `unbind_cb`가 모두 불리는지까지 본다 |
+| 심볼 거부는 그 심볼만 실패 | `test_source_symbol_rejection_fails_only_that_symbol`, `test_derived_upstream_rejection_fails_only_the_mapped_symbol`, `test_derived_rejection_shrinks_the_upstream`, `test_session_upstream_rejection_fails_only_that_slot` | 거부는 `reject(key, symbols)`로 한 번 주입한다. 파생은 표기가 다른 `FlakyMappedReq`라야 되돌리기가 시험된다 |
+| 구독 안 한 심볼만 거부하면 전체 실패 | `test_rejecting_only_unsubscribed_symbols_fails_the_stage` | 가드를 빼면 실패가 오지 않고 멈춘다 |
 | init 실패도 던지지 않고 알림 | `test_source_init_failure_is_notified_not_raised`, `test_derived_upstream_init_failure_fails_the_derived_stage`, `test_session_upstream_init_failure_fails_only_that_symbol`, `test_session_init_failure_is_notified_on_update` | init 실패는 `refuse_init(req)`로 한 번 주입한다 |
 
 테스트를 쓸 때 걸리는 제약:

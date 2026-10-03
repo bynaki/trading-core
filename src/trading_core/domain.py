@@ -4,7 +4,7 @@ from contextlib import aclosing, asynccontextmanager
 from typing import Any
 
 from .binder import BindPack
-from .exceptions import ChannelClosed, DomainError, StageFailed
+from .exceptions import ChannelClosed, DomainError, StageFailed, SymbolRejected
 from .logger import get_logger
 from .model import (
     BaseRequest,
@@ -345,13 +345,65 @@ class Domain:
             )
             return drained
 
+        async def fail_symbols(
+            symbols: set[str] | frozenset[str], exc: Exception
+        ) -> list[tuple[set[str], OnFail | None]]:
+            """`symbols`만 구독에서 빼고 남은 심볼로 다시 띄운다. 락 안에서 부른다.
+
+            알릴 소비자를 돌려준다. 남은 심볼이 없으면 `sync()`가 스테이지를 내린다.
+            """
+
+            taken = router.take(symbols)
+            log.error(
+                "심볼이 실패해 구독에서 뺐다", stage=stage_id, symbols=sorted(symbols), exc_info=exc
+            )
+            await sync()
+            return taken
+
         async def fail_and_notify(exc: Exception, seq: int | None = None):
             async with update_lock:
                 if retired or (seq is not None and seq != run_seq):
                     # 그 사이 `update()`가 generator를 새로 띄웠거나 스테이지가 이미 내려갔다.
                     log.error("지난 generator가 실패했다", stage=stage_id, exc_info=exc)
                     return
-                drained = await fail(exc)
+                rejected = (
+                    exc.symbols & router.symbols if isinstance(exc, SymbolRejected) else set()
+                )
+                if rejected:
+                    drained = await fail_symbols(rejected, exc)
+                else:
+                    # 다른 예외이거나, 지금 구독되지 않은 심볼만 거부했다. 후자를 같은 합집합으로
+                    # 다시 띄우면 끝없이 되풀이되므로 스테이지 전체의 실패로 본다.
+                    drained = await fail(exc)
+            await notify(drained, exc)
+
+        async def fail_upstream_symbols(failed: StageFailed):
+            """상위가 실패한 심볼(상위 표기)을 쓰는 하위 심볼만 내린다. 파생만 쓴다.
+
+            상위 스테이지 전체가 실패했으면 모든 하위 심볼이 걸려 이 스테이지도 전체가 실패한다.
+            """
+
+            assert derived_req is not None
+            async with update_lock:
+                if retired:
+                    return
+                current = router.symbols
+                # 하위 심볼마다 상위 표기를 구해 되돌린다. require 콜백이 심볼을 하나씩
+                # 바꾼다고 본다.
+                lower = {
+                    symbol
+                    for symbol in current
+                    if derived_req.resolve_upstream({symbol})[1] & failed.symbols
+                }
+                if lower and lower != current:
+                    drained = await fail_symbols(lower, failed)
+                else:
+                    # 모두 걸렸거나, 되돌리지 못했다. 후자를 그냥 두면 그 심볼이 소리 없이
+                    # 굶으므로 스테이지 전체의 실패로 본다.
+                    drained = await fail(failed)
+            await notify(drained, failed)
+
+        async def notify(drained: list[tuple[set[str], OnFail | None]], exc: Exception):
             for symbols, on_fail in drained:
                 if on_fail is not None:
                     await on_fail(symbols, exc)
@@ -361,7 +413,7 @@ class Domain:
 
             async def on_fail(symbols: set[str], exc: Exception):
                 failed = StageFailed.from_exception(upstream_content_id, symbols, exc)
-                await self._spawn(fail_and_notify(failed), f"{stage_id}:upstream-failed")
+                await self._spawn(fail_upstream_symbols(failed), f"{stage_id}:upstream-failed")
 
             return on_fail
 

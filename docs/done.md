@@ -124,3 +124,84 @@ DEBUG(진단), `SendRouter`의 "Sender가 없다"는 WARNING. `on_task_exception
 `SessionRequest`가 되고, `Domain`의 공개 API가 `subscribe()`/`stream()`/`Subscription`/
 `get_shared_symbols()`로 바뀌었다. 직렬화 형식(모델 타입 리터럴, `tr_annotation`의 `uid`·`created_by`
 키)도 바뀌었으므로 옛 형식으로 저장한 덤프는 `load_model()`로 되살릴 수 없다.
+
+### [done] policy:callback-exception
+사용자 콜백·generator·Sender가 던질 때의 정책을 정하고 구현했다. 전에는 원천·파생 generator가 던지면
+`_pump` 태스크만 조용히 죽어(DEBUG 로그) 스테이지가 `active_symbols`를 든 채 남았고, 합집합이 같으면
+재시작도 안 돼 소비자와 하위 파생·세션이 영영 굶었다. Sender 하나가 던지면 `SymbolRouter`의 `TaskGroup`을
+거쳐 공유 generator가 죽었고, 세션 `invoke()`가 던지면 슬롯 채널이 안 닫혀 상위가 계속 쌓였다.
+`unbind_cb`·`detach_cb`가 던지면 `detach()`가 중간에 끊기고 형제 콜백까지 취소됐다.
+
+정한 정책(`AGENTS.md` 핵심 불변식 7·8):
+- **코어는 재시도하지 않는다**(원천 포함). 재시도를 단계마다 두면 요청이 여러 단계를 거칠 때 곱해진다.
+  버틸지(재연결 등)는 binder가 generator 안에서 정한다.
+- **실패 단위는 (content_id, 심볼 부분집합)**. 스테이지·슬롯을 내리고 영향받은 소비자에게 자기 심볼만
+  담은 `StageFailed`(직렬화할 수 있게 `cause`는 문자열)를 `subscribe(..., on_error=)`로 알린다. 원천
+  실패는 하위 파생·세션 슬롯으로 연쇄한다. 세션은 슬롯(하위 표기 심볼) 단위, `always` 슬롯 실패만 세션
+  전체. 실패한 심볼은 구독에서 빠지고 `update()`로 다시 넣으면 새 스테이지가 init부터 선다.
+- **Sender 하나의 실패는 격리**: 그 Sender만 떼고 공유 generator는 계속.
+- **정리 실패는 삼킨다**: 끝까지 정리하고 ERROR 로그. 호출자에게 올리지 않는다(`ExceptionGroup`으로
+  올리는 안도 검토했으나, 정리는 구독을 연 쪽이 아니라 스테이지 쪽 일이라 호출자가 다룰 수 없다).
+- `stream()`은 실패하면 `StageFailed`를 던지고 끝난다.
+- 곁들여 고친 것: `open_slot()`이 bind 콜백을 다 받은 뒤에만 슬롯을 등록(도중 실패 시 부분 상태 없음),
+  빈 집합 `update()`가 스테이지를 새로 만들지 않음, 빠진 스테이지로 락을 기다리던 `update()`는 지금
+  등록된 스테이지로 넘김, generator 수명을 `pump()`의 `aclosing` 안으로 옮김, 원천·파생 스테이지 생성을
+  `_get_or_create_shared_stage()` 하나로 합침, `TaskManager` 예외 훅을 ERROR로.
+재현·검증: tests/test_domain.py의 "실패 정책" 절, tests/test_routing.py의
+`test_symbol_router_isolates_a_failing_sender`. 수정을 하나씩 되돌리면 해당 테스트만 깨지는 것을 확인했다.
+남은 것은 아래 policy:symbol-failure, policy:init-failure로 남겨 두었다.
+예제: ex10이 원천 generator·Sender·detach 콜백이 던질 때와 `stream()`의 실패를 판정과 함께 보여 준다
+(세션 슬롯·init 실패는 테스트만 덮는다).
+
+### [done] policy:symbol-failure
+원천은 심볼 합집합 하나로 돌아서, 한 소비자가 넣은 잘못된 심볼(상장 폐지·오타) 때문에 binder가 던지면
+같은 원천을 쓰는 모든 소비자가 실패했다. 이제 binder가 원천·파생 generator에서
+`raise SymbolRejected(symbols, reason)`을 던지면, 코어가 피해를 그 심볼로 좁힌다(`AGENTS.md` 핵심 불변식 7).
+
+정한 것(사용자가 오류를 신경 쓰지 않게 Domain이 다 처리한다는 방향):
+- **binder가 하는 일은 어느 심볼을 줄 수 없는지 던지는 것뿐이다.** 거래소 오류 응답에서 심볼을 읽어
+  낼 수 있는 것은 binder뿐이라 이 한 줄은 남는다. Domain이 일반 예외에서 범인 심볼을 찾는 방법(반씩
+  나눠 재시작)은 스테이지 전체의 실패를 심볼 탓으로 돌리고 재시도 금지와 부딪쳐 버렸다.
+- **`yield`가 아니라 `raise`다.** `yield SymbolRejected`안은 재연결이 없지만, binder가 거부한 심볼을
+  직접 걸러 내야 하고(빼먹으면 경고만 쌓인다) yield 타입이 넓어지며 활성 심볼 집합을 재시작 없이 고치는
+  예외 경로가 생긴다. 재시작은 소비자가 심볼을 바꿀 때마다 이미 일어나므로 binder는 원래 재시작을
+  견딘다. 재연결 비용이 문제가 되면 `yield`를 확장으로 더할 수 있다(같은 타입을 쓴다).
+- 그 심볼만 구독에서 빼(`SymbolRouter.take()`) 구독한 소비자에게 자기 심볼만 알리고, `sync()`가 남은
+  심볼로 다시 띄운다(`fail_symbols()`). 남은 심볼이 없으면 스테이지가 내려간다.
+- **가드**: 지금 구독된 심볼이 하나도 없는 거부는 스테이지 전체의 실패로 본다. 같은 합집합으로 다시
+  띄우면 끝없이 되풀이되거나, 아무것도 다시 띄우지 않아 멈춘다.
+- **파생 연쇄**: `on_upstream_fail()`이 스테이지 전체를 내리던 것을 `fail_upstream_symbols()`로 바꿨다.
+  하위 심볼마다 `resolve_upstream({s})`로 상위 표기를 구해 실패 집합과 겹치는 하위 심볼만 빼고 남은
+  심볼로 다시 띄운다. 모두 겹치면(상위 스테이지 전체 실패·init 실패) 지금처럼 전체가 실패한다. 되돌리지
+  못하면(여러 하위 심볼을 상위 하나로 묶는 require) 소리 없이 굶지 않게 전체 실패로 본다.
+- 세션은 `on_upstream_failed()`가 원래 상위 표기 심볼 단위로 슬롯을 닫으므로 바꾸지 않았다.
+- `stream()`은 심볼 하나의 거부에도 `StageFailed`를 던지고 끝난다(그대로).
+재현·검증: tests/test_domain.py의 "심볼 거부" 절 6개. 수정 전 `domain.py`로 돌리면 부분 실패를 보는 4개가
+깨지고(나머지 2개는 전체 실패가 기대값), 가드를 빼면 `test_rejecting_only_unsubscribed_symbols_fails_the_stage`가,
+파생 되돌리기를 빼면 `test_derived_upstream_rejection_fails_only_the_mapped_symbol`이 깨진다.
+예제: ex12가 상장 폐지·오타 심볼·파생 연쇄·세션 슬롯을 판정과 함께 보여 준다. 수정 전 `domain.py`로
+돌리면 11개가 회귀로 나온다.
+남은 것: 거부된 심볼이 지난 generator에서 왔는지 가리는 세대 검사(`run_seq`)는 기존 경로를 그대로 쓰며
+따로 테스트하지 않았다. `StageFailed`의 메시지는 심볼만 실패해도 "스테이지가 실패했다"로 나온다.
+
+### [done] policy:init-failure
+`init_cb`가 던질 때도 다른 실패처럼 `StageFailed`로 알린다(`AGENTS.md` 핵심 불변식 7). 전에는 원래
+예외가 `update()`(세션은 `subscribe()`) 호출자에게 올라갔는데, 경로에 따라 상태가 어긋났다:
+파생의 상위 init이 던지면 파생 스테이지가 소비자 심볼을 든 채 generator 없이 남았고(예외를 받은
+소비자가 실은 구독된 상태), 세션 슬롯의 상위 init이 던지면 `sync_upstreams()`의 `TaskGroup`을 거쳐
+`ExceptionGroup`이 올라가 어느 심볼인지 알 수 없었고 형제 상위의 `update()`가 도중에 취소될 수 있었으며
+실패한 심볼의 슬롯은 bind된 채 열려 있었다.
+
+정한 것:
+- 공유 스테이지(원천·파생)를 만들다 init이 던지면 스테이지를 두지 않고 그 센더의 `on_fail`로 요청 심볼의
+  실패를 알린다(`_update_shared_stage()`, 이름은 `_ensure_upstream_stage()`에서 바꿨다). 그래서 상위
+  init 실패는 상위 스테이지 실패와 같은 연쇄 경로를 탄다. 파생은 상위를 못 세우면 generator를 띄우지 않는다.
+- 세션 init은 공유 스테이지처럼 첫 `update()`로 미뤘다. 던지면 요청 심볼의 실패를 `update()`가 돌아오기
+  전에 알리고, 다음 `update()`가 다시 init한다.
+- binder 누락 같은 등록 오류(`DomainError`)는 init 실패가 아니므로 지금처럼 호출자에게 간다
+  (`_InitFailed`로 init 예외만 가른다).
+재현·검증: tests/test_domain.py의 `*init*` 테스트 5개. 수정 전 `domain.py`로 돌리면 5개 모두 깨진다.
+예제: ex11이 원천·파생 상위·세션 자신·세션 슬롯 상위의 init 실패와 등록 오류(`DomainError`)를 판정과
+함께 보여 준다. 수정 전 `domain.py`로 돌리면 1~4번이 회귀로 나온다.
+파생이 상위를 못 세웠을 때 generator를 띄우지 않는 가드는 테스트로 고정하지 못했다 — 실패 처리 태스크가
+generator의 첫 걸음보다 먼저 락을 잡아, 가드를 빼도 순서상 generator 본문이 돌지 않는다.

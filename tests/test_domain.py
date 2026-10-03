@@ -14,6 +14,7 @@ from trading_core import (
     DomainError,
     StageFailed,
     Subscription,
+    SymbolRejected,
     cast_model,
     get_model_uid,
 )
@@ -37,8 +38,10 @@ from .support.streams import (
     DerivedData,
     DerivedReq,
     FlakyDerivedReq,
+    FlakyMappedReq,
     FlakyReq,
     FlakySplitReq,
+    FlakySwingReq,
     FragileReq,
     InjectedFailure,
     MappedReq,
@@ -50,6 +53,7 @@ from .support.streams import (
     flaky_upstream,
     log_of,
     refuse_init,
+    reject,
     split_upstream,
     trip,
 )
@@ -927,6 +931,180 @@ async def test_session_init_failure_is_notified_on_update(domain: Domain):
         assert log.inits == 1
 
     assert log.unbound == ["BTC"]
+
+
+# ----- 심볼 거부 -----
+#
+# binder가 `SymbolRejected`를 던지면 그 심볼만 실패한다. 코어는 그 심볼을 구독에서 빼 구독한
+# 소비자에게만 알리고, 남은 심볼로 generator를 다시 띄운다.
+
+
+async def test_source_symbol_rejection_fails_only_that_symbol(domain: Domain):
+    """원천이 심볼 하나를 거부하면 그 심볼을 구독한 소비자에게만, 자기 심볼만 담아 알린다.
+
+    스테이지는 내려가지 않고 남은 심볼로 한 번 다시 시작한다. 다시 넣으면 binder가 다시 판단한다.
+    """
+
+    tag = "reject-source"
+    req = FlakyReq(tag=tag)
+    log = log_of(req)
+    rec_a, rec_b = Recorder("a"), Recorder("b")
+    fail_a, fail_b = Failures(), Failures()
+
+    async with (
+        domain.subscribe(req, rec_a, fail_a) as sub_a,
+        domain.subscribe(req, rec_b, fail_b) as sub_b,
+    ):
+        await sub_a.update({"A", "X"})
+        await sub_b.update({"B", "X"})
+        await wait_until(lambda: log.starts[-1:] == [frozenset({"A", "B", "X"})])
+
+        reject(tag, {"X"})
+        await fail_a.wait_for(1)
+        await fail_b.wait_for(1)
+
+        assert fail_a.received[0].content_id == req.tr_content_id
+        assert (fail_a.symbols, fail_b.symbols) == ({"X"}, {"X"})
+        rejected = fail_a.received[0].__cause__
+        assert isinstance(rejected, SymbolRejected)
+        assert rejected.symbols == {"X"}
+        assert shared_symbols(domain, req) == {"A", "B"}
+        await wait_until(lambda: log.starts[-1] == frozenset({"A", "B"}))
+        assert (log.inits, log.detached) == (1, 0)  # 스테이지는 그대로다
+
+        rec_a.clear()
+        rec_b.clear()
+        await wait_until(lambda: rec_a.symbols == {"A"} and rec_b.symbols == {"B"})
+
+        await sub_a.update({"A", "X"})  # 다시 넣으면 합집합이 바뀌어 다시 시작한다
+        await wait_until(lambda: "X" in rec_a.symbols)
+        assert log.inits == 1
+
+
+async def test_rejecting_every_symbol_releases_the_stage(domain: Domain):
+    """구독한 심볼을 모두 거부하면 남은 심볼이 없으므로 스테이지가 내려간다."""
+
+    tag = "reject-all"
+    req = FlakyReq(tag=tag)
+    log = log_of(req)
+    recorder, failures = Recorder(), Failures()
+
+    async with domain.subscribe(req, recorder, failures) as sub:
+        await sub.update({"BTC", "ETH"})
+        await recorder.wait_for(1)
+
+        reject(tag, {"BTC", "ETH", "ZZZ"})  # 구독하지 않은 심볼이 섞여도 된다
+        await failures.wait_for(1)
+
+        assert failures.symbols == {"BTC", "ETH"}
+        assert shared_symbols(domain, req) == set()
+        assert (log.inits, log.detached) == (1, 1)
+
+
+async def test_rejecting_only_unsubscribed_symbols_fails_the_stage(domain: Domain):
+    """구독하지 않은 심볼만 거부하면 스테이지 전체의 실패로 본다.
+
+    빼낼 심볼이 없어 같은 합집합으로 다시 띄우면 거부가 끝없이 되풀이될 수 있다.
+    """
+
+    tag = "reject-unsubscribed"
+    req = FlakyReq(tag=tag)
+    log = log_of(req)
+    recorder, failures = Recorder(), Failures()
+
+    async with domain.subscribe(req, recorder, failures) as sub:
+        await sub.update({"BTC"})
+        await recorder.wait_for(1)
+
+        reject(tag, {"ZZZ"})
+        await failures.wait_for(1)
+
+        assert failures.symbols == {"BTC"}
+        assert isinstance(failures.received[0].__cause__, SymbolRejected)
+        assert shared_symbols(domain, req) == set()
+        assert log.starts == [frozenset({"BTC"})]  # 다시 띄우지 않았다
+        assert log.detached == 1
+
+
+async def test_derived_upstream_rejection_fails_only_the_mapped_symbol(domain: Domain):
+    """상위가 `BTC/USD`를 거부하면 파생은 그에 대응하는 하위 `BTC`만 실패로 알린다.
+
+    파생은 남은 심볼로 다시 시작한다. 상위 표기와 하위 표기가 **다른** 요청이라야 되돌리기가
+    시험된다.
+    """
+
+    tag = "reject-derived-upstream"
+    derived, upstream = FlakyMappedReq(tag=tag), FlakyReq(tag=tag)
+    log = log_of(derived)
+    recorder, failures = Recorder(), Failures()
+
+    async with domain.subscribe(derived, recorder, failures) as sub:
+        await sub.update({"BTC", "ETH"})
+        await wait_until(lambda: recorder.symbols == {"BTC", "ETH"})
+
+        reject(tag, {f"BTC{QUOTE_SUFFIX}"})
+        await failures.wait_for(1)
+
+        assert failures.received[0].content_id == derived.tr_content_id
+        assert failures.symbols == {"BTC"}
+        upstream_failed = failures.received[0].__cause__
+        assert isinstance(upstream_failed, StageFailed)
+        assert upstream_failed.content_id == upstream.tr_content_id
+        assert upstream_failed.symbols == {f"BTC{QUOTE_SUFFIX}"}
+        assert isinstance(upstream_failed.__cause__, SymbolRejected)
+
+        assert shared_symbols(domain, derived) == {"ETH"}
+        assert shared_symbols(domain, upstream) == {f"ETH{QUOTE_SUFFIX}"}
+        await wait_until(lambda: log.starts[-1] == frozenset({"ETH"}))
+        assert (log.inits, log.detached) == (1, 0)
+
+        recorder.clear()
+        await wait_until(lambda: recorder.symbols == {"ETH"})
+
+
+async def test_derived_rejection_shrinks_the_upstream(domain: Domain):
+    """파생 자신이 심볼을 거부하면 그 심볼을 빼고, 상위에 등록한 심볼도 남은 것으로 줄인다."""
+
+    tag = "reject-derived"
+    derived, upstream = FlakyMappedReq(tag=tag), FlakyReq(tag=tag)
+    recorder, failures = Recorder(), Failures()
+
+    async with domain.subscribe(derived, recorder, failures) as sub:
+        await sub.update({"BTC", "ETH"})
+        await wait_until(lambda: recorder.symbols == {"BTC", "ETH"})
+
+        reject(f"{tag}:mapped", {"BTC"})
+        await failures.wait_for(1)
+
+        assert failures.symbols == {"BTC"}
+        assert isinstance(failures.received[0].__cause__, SymbolRejected)
+        assert shared_symbols(domain, derived) == {"ETH"}
+        assert shared_symbols(domain, upstream) == {f"ETH{QUOTE_SUFFIX}"}
+        assert log_of(upstream).detached == 0
+
+
+async def test_session_upstream_rejection_fails_only_that_slot(domain: Domain):
+    """세션 슬롯이 붙은 상위가 `BTC/USD`를 거부하면 하위 `BTC` 슬롯만 실패하고 unbind된다."""
+
+    tag = "reject-session-upstream"
+    req, upstream = FlakySwingReq(tag=tag), FlakyReq(tag=tag)
+    log = log_of(req)
+    recorder, failures = Recorder(), Failures()
+
+    async with domain.subscribe(req, recorder, failures) as sub:
+        await sub.update({"BTC", "ETH"})
+        await wait_until(lambda: recorder.symbols == {"BTC", "ETH"})
+
+        reject(tag, {f"BTC{QUOTE_SUFFIX}"})
+        await failures.wait_for(1)
+
+        assert failures.received[0].content_id == req.tr_content_id
+        assert failures.symbols == {"BTC"}
+        assert log.unbound == ["BTC"]
+        assert shared_symbols(domain, upstream) == {f"ETH{QUOTE_SUFFIX}"}
+
+        recorder.clear()
+        await wait_until(lambda: recorder.symbols == {"ETH"})
 
 
 async def test_cleanup_callback_failure_does_not_break_detach(domain: Domain):

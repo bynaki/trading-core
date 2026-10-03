@@ -14,7 +14,13 @@ from trading_core.domain import (
     Domain,
     Subscription,
 )
-from trading_core.exceptions import BindError, ChannelClosed, DomainError, StageFailed
+from trading_core.exceptions import (
+    BindError,
+    ChannelClosed,
+    DomainError,
+    StageFailed,
+    SymbolRejected,
+)
 from trading_core.model import (
     BaseRequest,
     DataModel,
@@ -65,6 +71,7 @@ __all__ = [
     "SourceRequest",
     "StageFailed",
     "Subscription",
+    "SymbolRejected",
     "__version__",
     "cast_model",
     "get_instance_id",

@@ -21,6 +21,7 @@ from trading_core import (
     Runnable,
     SessionRequest,
     SourceRequest,
+    SymbolRejected,
     cast_model,
     get_model_id,
     initialize,
@@ -389,6 +390,23 @@ def _init_or_refuse(req: BaseRequest) -> StreamContext:
     return StreamContext(req)
 
 
+_rejects: dict[str, set[str]] = {}
+
+
+def reject(key: str, symbols: set[str]) -> None:
+    """`key`의 binder가 다음 바퀴에 한 번 `symbols`를 거부하게 한다(`SymbolRejected`).
+
+    `FlakyReq`는 `tag`, `FlakyMappedReq`는 `f"{tag}:mapped"`가 키다.
+    """
+
+    _rejects[key] = set(symbols)
+
+
+def _raise_if_rejected(key: str) -> None:
+    if (symbols := _rejects.pop(key, None)) is not None:
+        raise SymbolRejected(symbols, f"테스트가 거부했다. - {key}")
+
+
 class FlakyReq(SourceRequest):
     """`trip(tag)`되면 한 번 던지는 원천 요청. 그 전까지는 `CounterReq`처럼 발행한다."""
 
@@ -405,7 +423,7 @@ def flaky(req: FlakyReq) -> StreamContext:
 
 @flaky
 async def _(ctx: StreamContext, symbols: set[str]):
-    """카운트를 발행하다가 `trip()`되면 던진다."""
+    """카운트를 발행하다가 `trip()`되면 던지고, `reject()`되면 그 심볼을 거부한다."""
 
     tag = cast_model(ctx.req, FlakyReq).tag
     ctx.log.starts.append(frozenset(symbols))
@@ -415,6 +433,7 @@ async def _(ctx: StreamContext, symbols: set[str]):
             if tag in _tripped:
                 _tripped.discard(tag)
                 raise InjectedFailure(f"원천이 끊겼다. - {tag}")
+            _raise_if_rejected(tag)
             for symbol in sorted(symbols):
                 yield CounterData(symbol=symbol, count=count)
             count += 1
@@ -465,6 +484,49 @@ async def _(ctx: StreamContext, symbols: set[str], recv: Receiver):
 
 
 @flaky_derived.detached
+async def _(ctx: StreamContext):
+    ctx.log.detached += 1
+
+
+class FlakyMappedReq(DerivedRequest):
+    """하위 `BTC`를 같은 `tag`의 `FlakyReq`에 `BTC/USD`로 요구하는 파생 요청.
+
+    `reject(f"{tag}:mapped", ...)`되면 파생 자신이 심볼을 거부한다.
+    """
+
+    tag: str
+
+
+@FlakyMappedReq.require
+def _(req: FlakyMappedReq, symbols: set[str]) -> tuple[FlakyReq, set[str]]:
+    return FlakyReq(tag=req.tag), {f"{s}{QUOTE_SUFFIX}" for s in symbols}
+
+
+@initialize
+def flaky_mapped(req: FlakyMappedReq) -> StreamContext:
+    """끊기는 원천 위의 심볼 변환 파생 스테이지 컨텍스트를 만든다."""
+
+    return StreamContext(req)
+
+
+@flaky_mapped
+async def _(ctx: StreamContext, symbols: set[str], recv: Receiver):
+    """상위 표기를 기초 자산으로 되돌려 발행한다. `reject()`되면 그 심볼을 거부한다."""
+
+    tag = cast_model(ctx.req, FlakyMappedReq).tag
+    ctx.log.starts.append(frozenset(symbols))
+    try:
+        while True:
+            _raise_if_rejected(f"{tag}:mapped")
+            data = cast_model(await recv(), CounterData)
+            symbol = data.symbol.removesuffix(QUOTE_SUFFIX)
+            if symbol in symbols:
+                yield DerivedData(symbol=symbol, count=data.count)
+    finally:
+        ctx.log.stopped += 1
+
+
+@flaky_mapped.detached
 async def _(ctx: StreamContext):
     ctx.log.detached += 1
 
@@ -577,6 +639,30 @@ async def _(ctx: StreamContext, symbol: str):
 
 
 @flaky_split.unbind
+async def _(ctx: StreamContext, symbol: str):
+    ctx.log.unbound.append(symbol)
+
+
+class FlakySwingReq(SessionRequest):
+    """`SwingReq`처럼 하위 `BTC`를 같은 `tag`의 `FlakyReq`에 `BTC/USD`로 붙이는 세션 요청."""
+
+    tag: str
+
+
+@initialize
+def flaky_swing(req: FlakySwingReq) -> StreamContext:
+    """끊기는 원천 하나를 공유하는 세션 스테이지의 컨텍스트를 만든다."""
+
+    return StreamContext(req)
+
+
+@flaky_swing
+async def _(ctx: StreamContext, symbol: str):
+    tag = cast_model(ctx.req, FlakySwingReq).tag
+    yield FlakyReq(tag=tag)(f"{symbol}{QUOTE_SUFFIX}") | Relay(symbol)
+
+
+@flaky_swing.unbind
 async def _(ctx: StreamContext, symbol: str):
     ctx.log.unbound.append(symbol)
 

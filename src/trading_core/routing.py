@@ -117,6 +117,22 @@ class SymbolRouter:
         self.clear()
         return [(symbols, on_fail) for symbols, on_fail in drained if symbols]
 
+    def take(self, symbols: set[str] | frozenset[str]) -> list[tuple[set[str], OnFail | None]]:
+        """`symbols`의 구독만 떼고, 센더마다 (뗀 심볼, 실패 콜백)을 돌려준다. 심볼 실패에 쓴다.
+
+        심볼이 모두 빠진 센더는 실패 콜백도 뺀다.
+        """
+
+        taken: dict[Sender[DataModel], set[str]] = {}
+        for symbol in symbols:
+            for sender in self._senders_by_symbol.pop(symbol, ()):
+                taken.setdefault(sender, set()).add(symbol)
+        result = [(removed, self._on_fail.get(sender)) for sender, removed in taken.items()]
+        for sender in taken:
+            if not self.symbols_of(sender):
+                self._on_fail.pop(sender, None)
+        return result
+
     async def __call__(self, data: DataModel):
         senders = list(self._senders_by_symbol.get(data.symbol, ()))
         if not senders:
