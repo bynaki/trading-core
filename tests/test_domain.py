@@ -49,6 +49,7 @@ from .support.streams import (
     UnboundReq,
     flaky_upstream,
     log_of,
+    refuse_init,
     split_upstream,
     trip,
 )
@@ -614,8 +615,9 @@ async def test_equal_session_requests_do_not_share_a_stage(domain: Domain):
 
 # ===== 실패 정책 =====
 #
-# 코어는 재시도하지 않는다. 실패한 스테이지·슬롯을 내리고 영향받은 소비자에게 자기 심볼만
-# 담은 `StageFailed`를 알린다. 정리 콜백의 실패는 정리를 끝까지 한 뒤 로그로만 남긴다.
+# 코어는 재시도하지 않는다. 실패한 스테이지·슬롯을 내리고(init이 던지면 세우지 않고) 영향받은
+# 소비자에게 자기 심볼만 담은 `StageFailed`를 알린다. 정리 콜백의 실패는 정리를 끝까지 한 뒤
+# 로그로만 남긴다.
 
 
 async def test_source_failure_is_not_retried_and_notifies_every_downstream(domain: Domain):
@@ -821,6 +823,112 @@ async def test_session_upstream_failure_fails_the_slots_using_it(domain: Domain)
         assert shared_symbols(domain, flaky_upstream(tag, "ETH")) == {f"ETH{QUOTE_SUFFIX}"}
 
 
+async def test_source_init_failure_is_notified_not_raised(domain: Domain):
+    """init 콜백이 던지면 `update()`는 던지지 않고 요청한 심볼의 실패를 알린다.
+
+    스테이지는 서지 않는다. 같은 심볼을 다시 넣으면 init부터 새로 한다.
+    """
+
+    tag = "fail-init-source"
+    req = FlakyReq(tag=tag)
+    log = log_of(req)
+    recorder, failures = Recorder(), Failures()
+
+    async with domain.subscribe(req, recorder, failures) as sub:
+        refuse_init(req)
+        await sub.update({"BTC", "ETH"})
+        await failures.wait_for(1)
+
+        assert failures.received[0].content_id == req.tr_content_id
+        assert failures.symbols == {"BTC", "ETH"}
+        assert isinstance(failures.received[0].__cause__, InjectedFailure)
+        assert shared_symbols(domain, req) == set()
+        assert (log.inits, log.detached) == (0, 0)
+
+        await sub.update({"BTC"})
+        await recorder.wait_for(1)
+        assert log.inits == 1
+
+    assert log.detached == 1
+
+
+async def test_derived_upstream_init_failure_fails_the_derived_stage(domain: Domain):
+    """상위의 init이 던지면 상위 스테이지가 실패한 것처럼 파생 스테이지가 연쇄해 실패한다.
+
+    파생 스테이지는 상위 없이 generator를 띄우지 않고 내려가, 소비자의 심볼이 남지 않는다.
+    """
+
+    tag = "fail-init-upstream"
+    derived, upstream = FlakyDerivedReq(tag=tag), FlakyReq(tag=tag)
+    failures = Failures()
+
+    async with domain.subscribe(derived, Recorder(), failures) as sub:
+        refuse_init(upstream)
+        await sub.update({"BTC"})
+        await failures.wait_for(1)
+
+        assert failures.received[0].content_id == derived.tr_content_id
+        assert failures.symbols == {"BTC"}
+        upstream_failed = failures.received[0].__cause__
+        assert isinstance(upstream_failed, StageFailed)
+        assert upstream_failed.content_id == upstream.tr_content_id
+        assert isinstance(upstream_failed.__cause__, InjectedFailure)
+
+        assert shared_symbols(domain, derived) == set()
+        assert log_of(derived).starts == []
+        assert (log_of(derived).inits, log_of(derived).detached) == (1, 1)
+
+
+async def test_session_upstream_init_failure_fails_only_that_symbol(domain: Domain):
+    """세션 슬롯의 상위 init이 던지면 그 상위를 쓰는 심볼만 실패하고 나머지는 계속 돈다."""
+
+    tag = "fail-init-session-upstream"
+    req = FlakySplitReq(tag=tag)
+    log = log_of(req)
+    recorder, failures = Recorder(), Failures()
+
+    async with domain.subscribe(req, recorder, failures) as sub:
+        refuse_init(flaky_upstream(tag, "BTC"))
+        await sub.update({"BTC", "ETH"})
+        await failures.wait_for(1)
+
+        assert failures.received[0].content_id == req.tr_content_id
+        assert failures.symbols == {"BTC"}  # 상위 표기(`BTC/USD`)가 아니다
+        upstream_failed = failures.received[0].__cause__
+        assert isinstance(upstream_failed, StageFailed)
+        assert upstream_failed.content_id == flaky_upstream(tag, "BTC").tr_content_id
+        assert log.unbound == ["BTC"]
+
+        recorder.clear()
+        await recorder.wait_for(3)
+        assert recorder.symbols == {"ETH"}
+
+        await sub.update({"BTC", "ETH"})  # 다시 넣으면 상위가 init부터 선다
+        await wait_until(lambda: "BTC" in recorder.symbols)
+
+
+async def test_session_init_failure_is_notified_on_update(domain: Domain):
+    """세션의 init은 첫 `update()`에서 한다. 던지면 요청한 심볼의 실패를 알리고 다음에 다시 한다."""
+
+    tag = "fail-init-session"
+    req = FlakySplitReq(tag=tag)
+    log = log_of(req)
+    recorder, failures = Recorder(), Failures()
+
+    refuse_init(req)
+    async with domain.subscribe(req, recorder, failures) as sub:
+        await sub.update({"BTC"})
+        assert failures.symbols == {"BTC"}  # `update()`가 돌아올 때 이미 알렸다
+        assert isinstance(failures.received[0].__cause__, InjectedFailure)
+        assert log.inits == 0
+
+        await sub.update({"BTC"})
+        await recorder.wait_for(1)
+        assert log.inits == 1
+
+    assert log.unbound == ["BTC"]
+
+
 async def test_cleanup_callback_failure_does_not_break_detach(domain: Domain):
     """unbind·detach 콜백이 던져도 `detach()`는 끝까지 정리하고 예외를 올리지 않는다.
 
@@ -857,6 +965,21 @@ async def test_stream_raises_stage_failed(domain: Domain):
 
     assert info.value.symbols == {"BTC"}
     assert log_of(req).detached == 1
+
+
+async def test_stream_raises_stage_failed_when_init_fails(domain: Domain):
+    """init이 던져도 `stream()`은 원래 예외가 아니라 `StageFailed`를 던진다."""
+
+    req = FlakyReq(tag="fail-init-stream")
+    refuse_init(req)
+
+    with pytest.raises(StageFailed) as info:
+        async with timeout(DEFAULT_TIMEOUT), domain.stream(req, {"BTC"}) as gen:
+            async for _ in gen:
+                pass
+
+    assert info.value.symbols == {"BTC"}
+    assert isinstance(info.value.__cause__, InjectedFailure)
 
 
 # ===== 생성 가드 =====

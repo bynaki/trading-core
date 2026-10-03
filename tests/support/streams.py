@@ -22,6 +22,7 @@ from trading_core import (
     SessionRequest,
     SourceRequest,
     cast_model,
+    get_model_id,
     initialize,
 )
 from trading_core.model import BaseRequest
@@ -370,6 +371,24 @@ def trip(tag: str) -> None:
     _tripped.add(tag)
 
 
+_init_refused: set[str] = set()
+
+
+def refuse_init(req: BaseRequest) -> None:
+    """`req`(`FlakyReq`·`FlakySplitReq`)의 다음 init 콜백이 한 번 던지게 한다."""
+
+    _init_refused.add(req.tr_content_id)
+
+
+def _init_or_refuse(req: BaseRequest) -> StreamContext:
+    """`refuse_init()`된 요청이면 한 번 던지고, 아니면 컨텍스트를 만든다."""
+
+    if req.tr_content_id in _init_refused:
+        _init_refused.discard(req.tr_content_id)
+        raise InjectedFailure(f"init 콜백이 실패했다. - {get_model_id(req)}")
+    return StreamContext(req)
+
+
 class FlakyReq(SourceRequest):
     """`trip(tag)`되면 한 번 던지는 원천 요청. 그 전까지는 `CounterReq`처럼 발행한다."""
 
@@ -379,9 +398,9 @@ class FlakyReq(SourceRequest):
 
 @initialize
 def flaky(req: FlakyReq) -> StreamContext:
-    """끊기는 원천의 공유 컨텍스트를 만든다."""
+    """끊기는 원천의 공유 컨텍스트를 만든다. `refuse_init()`되면 던진다."""
 
-    return StreamContext(req)
+    return _init_or_refuse(req)
 
 
 @flaky
@@ -546,9 +565,9 @@ def flaky_upstream(tag: str, symbol: str) -> FlakyReq:
 
 @initialize
 def flaky_split(req: FlakySplitReq) -> StreamContext:
-    """심볼별로 끊기는 상위를 쓰는 세션 스테이지의 컨텍스트를 만든다."""
+    """심볼별로 끊기는 상위를 쓰는 세션 스테이지의 컨텍스트를 만든다. `refuse_init()`되면 던진다."""
 
-    return StreamContext(req)
+    return _init_or_refuse(req)
 
 
 @flaky_split

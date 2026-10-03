@@ -35,6 +35,14 @@ class _StageCreationKey:
     pass
 
 
+class _InitFailed(Exception):
+    """공유 스테이지를 만들다 init 콜백이 던졌다. binder 누락 같은 `DomainError`와 가르려고 쓴다."""
+
+    def __init__(self, exc: Exception) -> None:
+        super().__init__(exc)
+        self.exc = exc
+
+
 _STAGE_CREATION_KEY = _StageCreationKey()
 
 
@@ -110,8 +118,9 @@ def _mark_detached(sub: Subscription) -> None:
 class Domain:
     """요청을 구독으로 바꿔 실행한다.
 
-    실패 정책: 코어는 재시도하지 않는다. generator·파이프라인·Sender가 던지면 그 스테이지나
-    슬롯을 내리고, 영향을 받은 소비자에게 **자기 심볼만** 담은 `StageFailed`를 알린다. 실패한
+    실패 정책: 코어는 재시도하지 않는다. init·bind 콜백, generator·파이프라인·Sender가 던지면 그
+    스테이지나 슬롯을 내리고(init이면 세우지 않고), 영향을 받은 소비자에게 **자기 심볼만** 담은
+    `StageFailed`를 알린다. 실패한
     심볼은 구독에서 빠지고, 소비자는 `update()`로 다시 넣을 수 있다. 무해한 끊김을 버틸지는
     binder가 generator 안에서 스스로 정한다. 정리 콜백(`detach`·`unbind`, generator의
     `finally`)의 실패는 정리를 끝까지 한 뒤 로그로만 남기고 호출자에게 올리지 않는다.
@@ -158,19 +167,39 @@ class Domain:
             return set()
         return set(stage.router.symbols)
 
-    async def _ensure_upstream_stage(
+    async def _update_shared_stage(
         self,
-        upstream: BaseRequest,
+        req: BaseRequest,
         sender: Sender[DataModel],
         symbols: set[str],
         on_fail: OnFail | None = None,
-    ):
-        stage = self._shared_stages.get(upstream.tr_content_id)
+    ) -> bool:
+        """`req`의 공유 스테이지에서 `sender`의 구독을 `symbols`로 바꾼다. 없으면 만든다.
+
+        빈 집합으로는 스테이지를 새로 만들지 않는다. 만들면 init 콜백이 불렸다가 곧바로
+        detach된다. 스테이지를 만들다 init 콜백이 던지면 스테이지를 두지 않고 `on_fail`로
+        `symbols`의 실패를 알린 뒤 `False`를 돌려준다.
+        """
+
+        stage = self._shared_stages.get(req.tr_content_id)
         if stage is None:
             if not symbols:
-                return
-            stage = self._get_or_create_shared_stage(upstream)
+                return True
+            try:
+                stage = self._get_or_create_shared_stage(req)
+            except _InitFailed as failed:
+                log.error(
+                    "init 콜백이 실패했다",
+                    request=get_model_id(req),
+                    content_id=req.tr_content_id,
+                    symbols=sorted(symbols),
+                    exc_info=failed.exc,
+                )
+                if on_fail is not None:
+                    await on_fail(set(symbols), failed.exc)
+                return False
         await stage.update(sender, symbols, on_fail)
+        return True
 
     def _create_shared_subscription(
         self, req: BaseRequest, sender: Sender, on_error: OnError | None
@@ -182,22 +211,13 @@ class Domain:
             sender=sender,
         )
 
-        async def release():
-            # 빈 집합으로 스테이지를 새로 만들지 않는다. 만들면 init 콜백이 불렸다가 곧바로
-            # detach된다.
-            if stage := self._shared_stages.get(req.tr_content_id):
-                await stage.update(sender, set())
-
         async def update(symbols: set[str]):
-            if not symbols:
-                await release()
-                return
             on_fail = self._subscriber_on_fail(req.tr_content_id, sender, on_error)
-            await self._get_or_create_shared_stage(req).update(sender, symbols, on_fail)
+            await self._update_shared_stage(req, sender, symbols, on_fail)
 
         async def detach():
             try:
-                await release()
+                await self._update_shared_stage(req, sender, set())
             finally:
                 _mark_detached(sub)
 
@@ -233,7 +253,10 @@ class Domain:
             raise DomainError(
                 "공유 스테이지는 `SourceRequest` 이거나 `DerivedRequest` 이어야 한다."
             )
-        ctx = bind_pack.get_init_cb()(req)
+        try:
+            ctx = bind_pack.get_init_cb()(req)
+        except Exception as exc:
+            raise _InitFailed(exc) from exc
         detach_cb = bind_pack.get_detach_cb()
         stage = SharedStage(
             _STAGE_CREATION_KEY,
@@ -257,7 +280,7 @@ class Domain:
             # 빠지기 직전의 이 스테이지를 잡고 락을 기다리던 호출이다. 여기서 generator를 띄우면
             # 아무도 찾지 못하는 스테이지가 되므로 지금 등록된 스테이지로 넘긴다(없고 심볼이
             # 있으면 새로 만든다).
-            await self._ensure_upstream_stage(req, sender, symbols, on_fail)
+            await self._update_shared_stage(req, sender, symbols, on_fail)
 
         async def refresh():
             async with update_lock:
@@ -282,9 +305,12 @@ class Domain:
                 # symbols만 넘기면 같은 channel의 이전 등록을 덮어써 먼저 구독한 쪽이 상위에서
                 # 사라진다.
                 upstream, upstream_symbols = derived_req.resolve_upstream(current_symbols)
-                await self._ensure_upstream_stage(
+                if not await self._update_shared_stage(
                     upstream, channel, upstream_symbols, on_upstream_fail(upstream)
-                )
+                ):
+                    # 상위를 세우지 못했다(init 실패). `on_upstream_fail()`이 띄운 태스크가 이
+                    # 스테이지를 실패로 내리므로 generator를 띄우지 않는다.
+                    return
                 gen = derived_cb(ctx, set(current_symbols), channel.recv)
             else:
                 assert source_cb is not None
@@ -301,7 +327,7 @@ class Domain:
             if self._shared_stages.get(content_id) is stage:
                 del self._shared_stages[content_id]
             if upstream is not None:
-                await self._ensure_upstream_stage(upstream, channel, set())
+                await self._update_shared_stage(upstream, channel, set())
             if detach_cb:
                 await self._run_cleanups("detach", [detach_cb(ctx)])
 
@@ -376,7 +402,7 @@ class Domain:
         always_cb = bind_pack.get_always_cb()
         if bind_cb is None:
             raise DomainError(f"`@bind`는 바인드 되어야 한다. - {model_id}")
-        ctx = init_cb(req)
+        ctx = None  # 공유 스테이지처럼 첫 `update()`에서 만든다. init 실패도 거기서 알린다.
         always_armed = always_cb is not None  # 다음 `update()`에서 `always` 슬롯을 연다
         slot_channels: dict[str, Channel[tuple[DataModel, Pipeline]]] = {}
         slot_senders: dict[str, set[PipelineSender]] = {}
@@ -522,38 +548,57 @@ class Domain:
             await notify(failed, upstream_failed)
 
         async def update(symbols: set[str]):
-            nonlocal ctx, always_armed
             failures: list[tuple[set[str], Exception]] = []
             async with update_lock:
-                if ctx is None:
-                    ctx = init_cb(req)
-                active_symbols: set[str] = set(slot_channels.keys())
-                current_symbols: set[str] = symbols | {_ALWAYS_SLOT}
-                await unbind_symbols(active_symbols - current_symbols)
-                if always_armed and always_cb:
-                    always_armed = False
-                    try:
-                        await open_slot(_ALWAYS_SLOT, always_cb(ctx))
-                    except Exception as exc:
-                        unbound = await fail_slots({_ALWAYS_SLOT}, exc)
-                        failures.append((unbound | symbols, exc))
-                if not failures:
-                    # `current_symbols`는 센티널을 지우지 않으려고 만든 것이라 여기에
-                    # 쓰면 안 된다. `_ALWAYS_SLOT` 슬롯은 위 `always_cb` 분기만 만든다.
-                    for symbol in symbols - active_symbols:
-                        try:
-                            await open_slot(symbol, bind_cb(ctx, symbol))
-                        except Exception as exc:
-                            log.error(
-                                "심볼을 bind하지 못했다",
-                                stage=stage_id,
-                                symbol=symbol,
-                                exc_info=exc,
-                            )
-                            failures.append(({symbol}, exc))
-                    await sync_upstreams()
+                await apply(symbols, failures)
             for failed_symbols, exc in failures:
                 await notify(failed_symbols, exc)
+
+        async def apply(symbols: set[str], failures: list[tuple[set[str], Exception]]) -> None:
+            """슬롯을 `symbols`에 맞추고 실패한 (심볼, 원인)을 `failures`에 모은다.
+
+            락 안에서 부른다. 알림은 락을 놓은 뒤 `update()`가 한다.
+            """
+
+            nonlocal ctx, always_armed
+            if ctx is None:
+                # 컨텍스트가 없으면 열린 슬롯도 없으므로 요청한 심볼이 모두 실패한다.
+                try:
+                    ctx = init_cb(req)
+                except Exception as exc:
+                    log.error(
+                        "init 콜백이 실패했다",
+                        stage=stage_id,
+                        symbols=sorted(symbols),
+                        exc_info=exc,
+                    )
+                    failures.append((set(symbols), exc))
+                    return
+            active_symbols: set[str] = set(slot_channels.keys())
+            current_symbols: set[str] = symbols | {_ALWAYS_SLOT}
+            await unbind_symbols(active_symbols - current_symbols)
+            if always_armed and always_cb:
+                always_armed = False
+                try:
+                    await open_slot(_ALWAYS_SLOT, always_cb(ctx))
+                except Exception as exc:
+                    unbound = await fail_slots({_ALWAYS_SLOT}, exc)
+                    failures.append((unbound | symbols, exc))
+                    return
+            # `current_symbols`는 센티널을 지우지 않으려고 만든 것이라 여기에
+            # 쓰면 안 된다. `_ALWAYS_SLOT` 슬롯은 위 `always_cb` 분기만 만든다.
+            for symbol in symbols - active_symbols:
+                try:
+                    await open_slot(symbol, bind_cb(ctx, symbol))
+                except Exception as exc:
+                    log.error(
+                        "심볼을 bind하지 못했다",
+                        stage=stage_id,
+                        symbol=symbol,
+                        exc_info=exc,
+                    )
+                    failures.append(({symbol}, exc))
+            await sync_upstreams()
 
         async def detach():
             try:

@@ -137,7 +137,13 @@ def _get_or_create_shared_stage(self, req: BaseRequest) -> SharedStage:
 
 def _create_session_subscription(self, req: BaseRequest, sender: Sender, on_error):
     ...                              # ← `_shared_stages`를 보지 않는다
-    ctx = bind_pack.get_init_cb()(req)   # 호출마다 새 컨텍스트
+    init_cb = bind_pack.get_init_cb()
+    ctx = None
+    ...
+    async def apply(symbols, failures):
+        ...
+        if ctx is None:
+            ctx = init_cb(req)       # 구독마다 새 컨텍스트 (첫 `update()`에서)
 ```
 
 `_create_session_subscription()`에는 content_id로 스테이지를 되찾는 경로도, 만든 스테이지를

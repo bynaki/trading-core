@@ -65,8 +65,9 @@ uv run examples/main.py parallel      # 모든 예제를 공유 Domain에서 동
 - 예제를 고치면 같은 디렉터리의 README도 함께 고친다.
 - 운영·설계 문서는 `docs/`에 있다: `plan.md`, `done.md`, `log.spec.md`(로그 모듈 설계),
   `naming.spec.md`(이름 정리 내역), 있을 때만 `HANDOFF.md`.
-- 예제는 ex01~ex09. ex06은 파생 스테이지의 "합집합이 그대로면 재시작 안 함", ex07·ex08은
-  세션 요청(ex08은 세션 스테이지가 content_id로 공유되지 **않음**), ex09는 로그 모듈이다.
+- 예제는 ex01~ex11. ex06은 파생 스테이지의 "합집합이 그대로면 재시작 안 함", ex07·ex08은
+  세션 요청(ex08은 세션 스테이지가 content_id로 공유되지 **않음**), ex09는 로그 모듈, ex10은
+  콜백이 던질 때의 실패 정책(`StageFailed`·`on_error`), ex11은 init 콜백이 던질 때다.
 - 예제 출력은 모두 `trading_core.logger`로 남긴다(`print` 없음). 공용 설정은
   `examples/setting.toml`이고 `main.py`와 각 `run_ex.py`의 `main()`이 `configure()`한다. 로거
   이름은 `__name__`이 아니라 `"ex05.origin"`처럼 직접 준다 — 직접 실행하면 `__main__`이 되어 어느
@@ -177,15 +178,17 @@ async def _(ctx: NamingAllContext): ...
 6. **bind ↔ unbind 짝** — 세션에서 `bind_cb`로 연 심볼은 `update()`로 빠지든 `detach()`로 닫히든
    `unbind_cb`가 **정확히 한 번** 불린다(`unbind_symbols()` 공유). 슬롯 닫기(`close_slots()`)는 슬롯
    태스크의 이름 해제까지 기다린다.
-7. **실패는 재시도하지 않고 심볼 단위로 알린다** — generator(원천·파생)·파이프라인·bind 콜백·소비자
-   `Sender`가 던지면 그 스테이지나 슬롯을 내리고, 영향받은 소비자에게 **자기 심볼만** 담은
-   `StageFailed`를 `on_error`로 알린다. 원천·파생 스테이지가 실패하면 그 스테이지를 상위로 둔 파생·세션
-   슬롯으로 연쇄한다(`__cause__`가 상위의 `StageFailed`). `Sender` 하나가 던지면 그 Sender만 떼고
+7. **실패는 재시도하지 않고 심볼 단위로 알린다** — init 콜백·generator(원천·파생)·파이프라인·bind
+   콜백·소비자 `Sender`가 던지면 그 스테이지나 슬롯을 내리고(init이면 세우지 않고), 영향받은 소비자에게
+   **자기 심볼만** 담은 `StageFailed`를 `on_error`로 알린다. `update()`·`subscribe()`는 던지지 않는다.
+   원천·파생 스테이지가 실패하면(init 실패 포함) 그 스테이지를 상위로 둔 파생·세션 슬롯으로 연쇄한다
+   (`__cause__`가 상위의 `StageFailed`). `Sender` 하나가 던지면 그 Sender만 떼고
    공유 generator는 계속 돈다. 실패한 심볼은 구독에서 빠지고, `update()`로 다시 넣으면 새 스테이지가
-   init부터 선다. 버틸지(재연결 등)는 binder가 generator 안에서 정한다.
+   init부터 선다. 버틸지(재연결 등)는 binder가 generator 안에서 정한다. 세션도 공유 스테이지처럼
+   init을 첫 `update()`에서 한다. binder 누락 같은 등록 오류(`DomainError`)는 지금처럼 호출자에게 간다.
 8. **정리 실패는 정리를 막지 않는다** — `detach_cb`·`unbind_cb`·binder `finally`가 던져도 나머지 정리를
    끝까지 하고(`_run_cleanups()`, 형제를 취소하지 않는다) ERROR 로그만 남긴다. `update()`·`detach()`의
-   호출자에게 올리지 않는다. `init_cb`의 예외는 지금처럼 호출자에게 간다(`policy:init-failure`).
+   호출자에게 올리지 않는다.
 
 소비 API: `Domain.stream(req, symbols)`는 async generator를 준다(`aclosing`으로 감싸 조기 `break`에도
 정리). `Domain.subscribe(req, sender)`는 호출자가 `Sender`를 주고 `sub.update(symbols)`로 심볼을
@@ -195,7 +198,7 @@ async def _(ctx: NamingAllContext): ...
 심볼 합집합을 돌려준다(공유 중이 아니면 빈 집합). `Subscription`·`SharedStage`는 `_STAGE_CREATION_KEY`
 가드로 `Domain`을 통해서만 만들어진다. 공개 API는 작게 두고 내부 객체(스테이지)를 돌려주지 않는다.
 
-의존 스트림: `_ensure_upstream_stage()`가 상위 `SharedStage`를 만들거나 재사용하고 `Channel`로
+의존 스트림: `_update_shared_stage()`가 상위 `SharedStage`를 만들거나 재사용하고 `Channel`로
 하위 binder의 `recv`에 잇는다. 상위도 content_id·합집합 기준으로 공유된다. 순환 의존은 지원하지 않는다.
 파생 스테이지는 상위 하나만 바라보므로 **require 콜백이 심볼에 따라 다른 상위 요청을 반환할 수 없다.**
 
@@ -299,6 +302,7 @@ DEBUG 로그를, 예외 훅은 ERROR 로그를 남긴다(태스크까지 새어 
 | Sender 하나의 실패를 격리 | `test_failing_sender_does_not_stop_other_consumers`, `test_symbol_router_isolates_a_failing_sender` | |
 | 세션 실패는 하위 표기 심볼 하나만 | `test_session_slot_failure_fails_only_that_symbol`, `test_session_upstream_failure_fails_the_slots_using_it` | 표기가 다른 요청이라야 잡힌다 |
 | 정리 콜백이 던져도 정리를 끝냄 | `test_cleanup_callback_failure_does_not_break_detach` | 형제 `unbind_cb`가 모두 불리는지까지 본다 |
+| init 실패도 던지지 않고 알림 | `test_source_init_failure_is_notified_not_raised`, `test_derived_upstream_init_failure_fails_the_derived_stage`, `test_session_upstream_init_failure_fails_only_that_symbol`, `test_session_init_failure_is_notified_on_update` | init 실패는 `refuse_init(req)`로 한 번 주입한다 |
 
 테스트를 쓸 때 걸리는 제약:
 
@@ -309,8 +313,8 @@ DEBUG 로그를, 예외 훅은 ERROR 로그를 남긴다(태스크까지 새어 
   `wait_until()`로 확인하고, 동기로 단정할 수 있는 건 `domain.get_shared_symbols()`뿐이다. 예외로 세션의
   `unbind_cb`는 `update()`가 await하므로 반환 직후 단정할 수 있다.
 - binder는 무한히 발행하므로 소비 개수나 `Recorder.wait_for()`로 끝낸다.
-- 실패 통지도 태스크로 돌아 비동기다. `Failures.wait_for()`로 기다린다. 예외로 세션 bind 콜백의 실패는
-  `update()`가 돌아올 때 이미 알려져 있다. 실패를 기다리는 테스트는 제한 시간을 둔다(`stream()` 루프 등) —
+- 실패 통지도 태스크로 돌아 비동기다. `Failures.wait_for()`로 기다린다. 예외로 세션 자신의 init·bind
+  콜백의 실패는 `update()`가 돌아올 때 이미 알려져 있다. 실패를 기다리는 테스트는 제한 시간을 둔다(`stream()` 루프 등) —
   안 그러면 회귀가 실패가 아니라 멈춤으로 나타난다.
 - `test_logger.py`는 전역 루트 로거를 건드린다. autouse 픽스처가 CWD·환경변수를 격리하고 `shutdown()`으로
   되돌린다. 레코드는 파일 싱크를 켜고 `shutdown()`으로 큐를 비운 뒤 읽는다(리스너 스레드가 쓴다).

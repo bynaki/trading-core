@@ -5,7 +5,7 @@
 > 열린 항목과 관련이 없어진 것은 `docs/done.md`로 옮기고 여기서 지운다(상세 규칙은 `AGENTS.md`
 > "새 세션을 시작할 때" 참고).
 
-> 열린 과제는 logger:server-transport, policy:symbol-failure(보류), policy:init-failure다.
+> 열린 과제는 logger:server-transport, policy:symbol-failure(보류)다.
 
 ### [done] policy:callback-exception
 사용자 콜백·generator·Sender가 던질 때의 정책을 정하고 구현했다. 전에는 원천·파생 generator가 던지면
@@ -32,6 +32,8 @@
 재현·검증: tests/test_domain.py의 "실패 정책" 절, tests/test_routing.py의
 `test_symbol_router_isolates_a_failing_sender`. 수정을 하나씩 되돌리면 해당 테스트만 깨지는 것을 확인했다.
 남은 것은 아래 policy:symbol-failure, policy:init-failure로 남겨 두었다.
+예제: ex10이 원천 generator·Sender·detach 콜백이 던질 때와 `stream()`의 실패를 판정과 함께 보여 준다
+(세션 슬롯·init 실패는 테스트만 덮는다).
 
 ### policy:symbol-failure
 원천이 **심볼 하나만** 실패로 알리는 길이 없다(보류). 원천 generator는 심볼 합집합 하나로 돌므로, 한
@@ -39,9 +41,27 @@
 지금은 binder가 그런 심볼을 던지지 말고 건너뛰도록 해야 한다. 필요해지면 binder가 "`X`는 못 준다"를
 알리고 코어가 스테이지를 죽이지 않은 채 `StageFailed(symbols={X})`만 내보내는 API를 둔다.
 
-### policy:init-failure
-`init_cb`가 던질 때의 정책이 정해지지 않았다. 지금은 스테이지를 만드는 `update()`(세션은 `subscribe()`)의
-호출자에게 그대로 올라간다. 다른 실패처럼 `StageFailed`로 알릴지 정해야 한다.
+### [done] policy:init-failure
+`init_cb`가 던질 때도 다른 실패처럼 `StageFailed`로 알린다(`AGENTS.md` 핵심 불변식 7). 전에는 원래
+예외가 `update()`(세션은 `subscribe()`) 호출자에게 올라갔는데, 경로에 따라 상태가 어긋났다:
+파생의 상위 init이 던지면 파생 스테이지가 소비자 심볼을 든 채 generator 없이 남았고(예외를 받은
+소비자가 실은 구독된 상태), 세션 슬롯의 상위 init이 던지면 `sync_upstreams()`의 `TaskGroup`을 거쳐
+`ExceptionGroup`이 올라가 어느 심볼인지 알 수 없었고 형제 상위의 `update()`가 도중에 취소될 수 있었으며
+실패한 심볼의 슬롯은 bind된 채 열려 있었다.
+
+정한 것:
+- 공유 스테이지(원천·파생)를 만들다 init이 던지면 스테이지를 두지 않고 그 센더의 `on_fail`로 요청 심볼의
+  실패를 알린다(`_update_shared_stage()`, 이름은 `_ensure_upstream_stage()`에서 바꿨다). 그래서 상위
+  init 실패는 상위 스테이지 실패와 같은 연쇄 경로를 탄다. 파생은 상위를 못 세우면 generator를 띄우지 않는다.
+- 세션 init은 공유 스테이지처럼 첫 `update()`로 미뤘다. 던지면 요청 심볼의 실패를 `update()`가 돌아오기
+  전에 알리고, 다음 `update()`가 다시 init한다.
+- binder 누락 같은 등록 오류(`DomainError`)는 init 실패가 아니므로 지금처럼 호출자에게 간다
+  (`_InitFailed`로 init 예외만 가른다).
+재현·검증: tests/test_domain.py의 `*init*` 테스트 5개. 수정 전 `domain.py`로 돌리면 5개 모두 깨진다.
+예제: ex11이 원천·파생 상위·세션 자신·세션 슬롯 상위의 init 실패와 등록 오류(`DomainError`)를 판정과
+함께 보여 준다. 수정 전 `domain.py`로 돌리면 1~4번이 회귀로 나온다.
+파생이 상위를 못 세웠을 때 generator를 띄우지 않는 가드는 테스트로 고정하지 못했다 — 실패 처리 태스크가
+generator의 첫 걸음보다 먼저 락을 잡아, 가드를 빼도 순서상 generator 본문이 돌지 않는다.
 
 ### [done] logger:core
 프로젝트 전반 로그 모듈(`logger.py`). 설계는 `docs/log.spec.md`에 있다. `setting.toml`의 `[log]`
