@@ -1,6 +1,8 @@
 ---
 name: commit
 description: 이 저장소의 커밋 절차. 사용자가 커밋을 요청할 때(“커밋해”, “커밋하자”, /commit) 반드시 이 순서를 따른다 — plan→done 이관, 개인정보·보안 검사, 보고·승인, 커밋.
+model: sonnet
+effort: medium
 ---
 
 # 커밋 절차
