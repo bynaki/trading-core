@@ -5,7 +5,7 @@
 > 열린 항목과 관련이 없어진 것은 `docs/done.md`로 옮기고 여기서 지운다(상세 규칙은 `AGENTS.md`
 > "새 세션을 시작할 때" 참고).
 
-> 열린 과제는 logger:server-transport다.
+> 열린 과제는 logger:server-transport, api:export-model-validation-error, api:typed-subscription이다.
 
 ### [done] logger:core
 프로젝트 전반 로그 모듈(`logger.py`). 설계는 `docs/log.spec.md`에 있다. `setting.toml`의 `[log]`
@@ -25,3 +25,13 @@
 타이머·재시도·백오프는 실제로 붙일 로그서버가 정해지면 같이 정한다. `[log.server] enabled = true`인
 채로 이 항목을 그대로 두면 `configure()`가 `LogConfigError`로 fail-fast하므로, 정책 미정 상태에서도
 "조용히 안 나가는" 사고는 나지 않는다.
+
+### api:export-model-validation-error
+`ModelValidationError`(`cast_model()`·`load_model()`·`parse_dump()`가 던진다)를 최상위 `trading_core`에서
+내보내지 않는다. 사용자가 잡으려면 `trading_core.exceptions`에서 import해야 하고, ex28이 그렇게 한다.
+`ModelError`·`BindError` 등은 최상위에 있으므로 함께 내보낼지 정한다. 내보내면 ex28의 import를 고친다.
+
+### api:typed-subscription
+`Domain.subscribe()`가 돌려주는 `Subscription`의 `request`가 `BaseRequest`로만 타입이 잡힌다
+(`Subscription[T]`는 제네릭인데 `subscribe()`가 요청 타입을 이어 주지 않는다). ex27은
+`cast_model(sub.request, TickReq)`로 좁힌다. `subscribe()`·`stream()`을 요청 타입에 제네릭으로 할지 본다.

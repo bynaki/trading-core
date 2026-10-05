@@ -232,7 +232,8 @@ class Runnable[Tin: DataModel, Tout: DataModel](Protocol):
 class Pipeline[Treq: BaseRequest]:
     """상위 요청의 심볼 하나에서 시작해 단계(`Runnable`)를 차례로 거치는 파이프라인.
 
-    `req(symbol) | step | ...`으로 만든다. `upstream_symbol`은 상위 표기(원천이 아는 심볼)다.
+    `req(symbol) | step | ...`으로 만든다. `upstream_symbol`은 상위 표기(소스 스테이지가 아는
+    심볼)다.
     """
 
     def __init__(self, pre: Pipeline[Treq], *steps: Runnable):
@@ -277,7 +278,7 @@ class BaseRequest(TrBaseModel):
 
 
 class SourceRequest(BaseRequest):
-    """원천 요청. content_id가 같은 요청끼리 스테이지를 공유한다."""
+    """소스 요청. content_id가 같은 요청끼리 스테이지를 공유한다."""
 
 
 class DerivedRequest(BaseRequest):

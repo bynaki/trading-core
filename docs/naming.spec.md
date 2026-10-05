@@ -9,14 +9,14 @@
 API가 아직 자리 잡는 중이라(README가 일부러 얇다) 이름을 바꾸기 좋은 때다. 코드 전체를 읽어 보면
 문제는 세 가지다.
 
-- **한 개념에 이름이 여럿이다.** 원천 하나를 Generate·generator·gen·origin으로 부른다.
+- **한 개념에 이름이 여럿이다.** 소스 요청 하나를 Generate·generator·gen·origin으로 부른다.
 - **한 이름이 여러 개념을 떠안았다.** `origin`, `require`, `RequireCb`가 그렇다.
 - **이름과 동작이 다르다.** `_define_*`는 실제로 get-or-create이고, `submit_count`는 실제로 살아 있는
   태스크 수다.
 
 ## 2. 원칙
 
-- 요청 3종은 **역할이 드러나는 한 규칙**으로 이름 짓는다: 원천(source) · 파생(derived) · 세션(session).
+- 요청 3종은 **역할이 드러나는 한 규칙**으로 이름 짓는다: 소스 요청(source) · 파생 요청(derived) · 세션 요청(session).
 - `Domain`의 공개 API는 **작게** 두고 **내부 객체를 드러내지 않는다.** 사용자가 받는 것은 구독이지
   스테이지가 아니다. 내부 객체가 공개 API에 나오면 계약이 구현 방식에 묶인다.
 - 직렬화되어 프로세스 밖으로 나가는 이름(모델 타입 리터럴, `tr_annotation` 키)은 한 번 정하면
@@ -29,7 +29,7 @@ API가 아직 자리 잡는 중이라(README가 일부러 얇다) 이름을 바�
 
 1. **`GenerateModel` → `SourceRequest`, `DependentModel` → `DerivedRequest`,
    `RequestModel` → `SessionRequest`** (`BaseReqModel` → `BaseRequest`). 지금은 셋 다 요청인데 하나만
-   `RequestModel`이라서 이름으로 구분이 안 된다. 원천은 데이터를 가져오고 파생은 변환하며, 둘 다
+   `RequestModel`이라서 이름으로 구분이 안 된다. 소스 요청은 데이터를 가져오고 파생 요청은 변환하며, 둘 다
    content_id가 같으면 스테이지를 공유한다. 세션은 주식 차트 분석에 쓰는 핵심 요청으로, 소비자 하나가
    상태를 가진 채 분석하므로 content_id가 같아도 공유하지 않는다. `SessionRequest`의 docstring에
    "상태를 가지므로 content_id가 같아도 스테이지를 공유하지 않는다(ex08)"를 적는다.
@@ -81,7 +81,7 @@ API가 아직 자리 잡는 중이라(README가 일부러 얇다) 이름을 바�
     같다. 세션 요청의 것은 "구독 심볼과 상관없이 늘 붙는 파이프라인"이라서, 파생 요청의 `@Req.require`
     (상위 요청 선언)와 뜻이 다르다.
 16. **"origin" 정리**: `OriginStage`/`_origin_stage_dict` → `SharedStage`/`_shared_stages`(파생 스테이지도
-    들어가므로 "원천"이 아니다), `_tr_origin_annotation` → `_tr_loaded_annotation`(역직렬화로 들어온
+    들어가므로 "소스 스테이지"가 아니다), `_tr_origin_annotation` → `_tr_loaded_annotation`(역직렬화로 들어온
     어노테이션), `SequenceSender.origin_sender`는 쓰는 곳이 없어 삭제한다.
 
 ### E. 이름과 실제 동작이 다른 경우
@@ -189,3 +189,8 @@ A~C절은 공개 계약과 직렬화 형식이라 먼저 확정한다. D~G절은
 - **8번이 약하게 만든 검증**: `get_shared_symbols()`는 "공유 안 됨"과 "공유되지만 심볼 없음"이 둘 다 빈
   집합이다. 그래서 `test_equal_session_requests_do_not_share_a_stage`는 세션 요청이 공유 레지스트리에
   들어가지 않는지를 `domain._shared_stages`로 직접 본다.
+- **한글 용어 "원천" → "소스"**: `SourceRequest`를 부르는 한글 용어를 "원천"으로 정했다가 "소스"로 바꿨다.
+  "원천"은 잘 쓰지 않는 말이고, "소스"는 클래스 이름·모델 타입 리터럴(`"source"`)과 그대로 맞는다.
+  "원본"은 구독할 때 찍어 두는 요청 사본과 짝으로 읽혀 고르지 않았다. 이 문서도 함께 고쳤고,
+  `docs/done.md`의 지난 기록은 그대로 두었다. "소스"만 혼자 쓰면 소스코드로 읽히므로 "소스 요청"·"소스
+  스테이지"·"소스 generator"처럼 늘 명사를 붙인다.

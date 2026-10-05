@@ -28,7 +28,7 @@ from trading_core.binder import BindPack
 
 
 class GenReq(SourceRequest):
-    """generate 콜백을 바인드할 원천 요청."""
+    """generate 콜백을 바인드할 소스 요청."""
 
     tag: str
 
@@ -63,7 +63,7 @@ class PlainData(DataModel):
     value: str
 
 
-# ===== 원천 제너레이터 등록 =====
+# ===== 소스 제너레이터 등록 =====
 
 
 @initialize

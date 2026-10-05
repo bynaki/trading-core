@@ -205,3 +205,96 @@ DEBUG(진단), `SendRouter`의 "Sender가 없다"는 WARNING. `on_task_exception
 함께 보여 준다. 수정 전 `domain.py`로 돌리면 1~4번이 회귀로 나온다.
 파생이 상위를 못 세웠을 때 generator를 띄우지 않는 가드는 테스트로 고정하지 못했다 — 실패 처리 태스크가
 generator의 첫 걸음보다 먼저 락을 잡아, 가드를 빼도 순서상 generator 본문이 돌지 않는다.
+
+### [done] domain:request-snapshot
+구독한 뒤 요청을 고치면 스테이지가 새던 버그. `_create_shared_subscription()`의 `update`/`detach`가
+부를 때마다 `req.tr_content_id`를 다시 계산해, 고친 뒤의 content_id로 스테이지를 찾았다. 처음
+스테이지는 아무도 닫지 못한 채(detach 콜백 없이) 떠난 소비자에게 계속 보냈다. `_create_subscription()`이
+요청을 `model_copy(deep=True)`로 찍어 두고 `Subscription.request`도 사본을 주게 고쳤다. 세션의 상위
+구독은 `request.tr_content_id` 대신 상위 content_id를 키로 찾는다.
+재현·검증: `test_mutating_the_request_after_subscribe_does_not_leak_the_stage`,
+`test_session_uses_the_request_as_subscribed`(수정을 되돌리면 둘만 깨진다).
+
+### [done] examples:rewrite
+처음 배우는 사람이 따라오게 예제를 **기능·사건 하나에 예제 하나**로 다시 쓴다. 정한 것:
+
+- 예제 하나 = 파일 하나, 평평하게(`examples/ex01_stream.py`). 위에서 아래로 모델 → binder → 실행 →
+  `main()`. 예제별 README는 없애고 설명은 모듈 docstring(배우는 것·실행·기대 출력 발췌·다음 예제)과
+  주석에 둔다. 목차는 `examples/README.md` 하나.
+- 정상/회귀 판정표는 없애고 핵심 지점에 `assert`를 둔다(`main.py serial`이 회귀를 여전히 잡는다).
+- import는 최상위 `trading_core`에서만. 모의 데이터는 표 대신 계산으로, 발행 간격은 0.2초 안팎.
+  `main()`은 늘 `domain.stop()`. `main.py`는 `examples/ex*.py`를 글롭한다.
+- 29개로 간다.
+
+| # | 주제 | 출처 |
+| --- | --- | --- |
+| 01 | 가장 작은 소스 요청 + `Domain.stream()`, start/stop | ex01 |
+| 02 | `subscribe()`·Sender, `update()`는 교체, 빈 집합은 해제 | ex03·06 |
+| 03 | 두 정리 지점: generator `finally` vs `@detached` (심볼을 바꿔야 갈리므로 02 뒤) | ex01·03 |
+| 04 | content_id가 같으면 스테이지·init 하나, 다르면 따로 | ex02·08 |
+| 05 | binder엔 합집합, 출력은 구독한 심볼로만 fan-out | ex03·05 |
+| 06 | 합집합이 바뀔 때만 재시작, 컨텍스트는 재시작을 넘어 유지 | ex06·03 |
+| 07 | `require`(요청만)·`recv()`, 파생 여럿이 소스 스테이지 하나 공유 | ex02 |
+| 08 | `require`(심볼까지) 하위→상위 표기, 안 되돌리면 조용히 사라짐 | ex04·05 |
+| 09 | 요청 필드로 상위 소스 요청 고르기(심볼별로는 불가) | ex04 |
+| 10 | 파생 위의 파생(다단) | 신규 |
+| 11 | 세션: bind→`Pipeline`, `Runnable`, 상·하위 표기, `None`으로 거르기 | ex07 |
+| 12 | `unbind`·`detached`, bind↔unbind 한 번씩 | ex08 |
+| 13 | 같은 content_id라도 세션은 공유 안 됨 | ex08 |
+| 14 | 여러 단계 파이프라인 `req(s) \| a \| b \| c` | 신규 |
+| 15 | 한 슬롯이 소스 요청 둘을 합치기(bind가 파이프라인 여럿 yield) | 신규 |
+| 16 | `@x.always` | 신규 |
+| 17 | 소스 generator 실패: 재시도 없음, `StageFailed`, 연쇄, 다시 넣기 | ex10 |
+| 18 | Sender 하나의 실패 격리 | ex10 |
+| 19 | 정리 콜백 실패해도 정리 끝 | ex10 |
+| 20 | `stream()`은 `StageFailed`를 던진다 | ex10 |
+| 21 | init 실패(소스 요청, 파생의 상위) | ex11 |
+| 22 | 세션 실패(init·bind·파이프라인 단계) → 그 심볼만 | ex11 + 신규 |
+| 23 | `always` 실패 → 세션 전체, init부터 다시 | 신규 |
+| 24 | `SymbolRejected`(소스·파생·세션 요청) | ex12 |
+| 25 | 느린 소비자가 공유 generator를 붙잡는다 → 자기 큐로 떼는 패턴 | 신규 |
+| 26 | 등록·사용 실수: `BindError`·`ModelError`·`DomainError`·끊긴 구독 | 신규 + ex11 |
+| 27 | 식별자 3종, `compute_tr_content_id`, 가변 모델(구독은 사본) | 신규 |
+| 28 | 직렬화: `tr_annotation`·`load_model`·`parse_dump`·`cast_model`·`set_instance_id` | 신규 |
+| 29 | 로그 모듈 | ex09 |
+
+순서: 공통 틀 + 1부(01~06)를 먼저 쓰고 형식을 확인받는다 → 2·3부 → 4·5부 → 문서(`examples/README.md`,
+루트 README, `AGENTS.md`의 예제 목록·"예제 README" 규칙·테스트 표의 "ex06/ex08 시나리오" 참조) →
+검사 4종 + `serial`·`parallel`.
+
+확인한 것: 10·15·16·22(파이프라인 단계가 던짐)·25는 스크래치로 동작을 확인했다. 느린 Sender(건당
+0.5초) 하나가 있으면 같은 소스 스테이지의 빠른 소비자가 1.2초에 3건만 받았다(평소 약 24건).
+
+결과: 01~29를 다 썼고 옛 예제 디렉터리(ex01~ex12)를 모두 지웠다. 29는 전용 설정
+`examples/ex29_logging.toml`을 쓴다. 목차 `examples/README.md`를 새로 쓰고 루트 README·`AGENTS.md`의
+예제 설명과 테스트 docstring의 옛 예제 참조를 고쳤다. 쓰며 안 것:
+- 사슬이 내려갈 때 `@detached`는 소스 스테이지부터(아래→위) 불린다(ex10이 출력으로 보인다).
+- 되돌리지 않은 파생 데이터는 소비자에게 오류 없이 버려지고 `trading_core.routing` WARNING만 건마다
+  남는다(ex08).
+- 기대 출력이 실행마다 같도록, 그 예제의 주제가 아닌 재시작 로그(소비자가 붙고 빠질 때 소스
+  generator가 다시 뜨는 줄)는 남기지 않는다. 소비자를 `update()`로 연달아 붙이면 먼저 제출된
+  generator가 대기 중에 취소되어 한 번만 뜬다.
+- 세션 출력은 심볼로 라우팅되지 않고 그 구독의 Sender로 바로 간다. 그래서 세션은 출력 `symbol`을
+  되돌리지 않아도 데이터가 사라지지 않는다(파생과 다르다, ex11).
+- 세션 bind는 `symbols - active` 집합을 도는 순서라 심볼 여럿을 한 번에 넣으면 bind 순서가 실행마다
+  바뀐다. 순서를 보이는 예제(12·15·16)는 심볼을 하나씩 넣는다.
+- `stream()`은 첫 데이터를 기다릴 때 구독을 시작한다. 블록에 들어가자마자 `get_shared_symbols()`를 보면
+  비어 있다(ex11).
+- `log.info(..., **dict)`는 pyright가 `exc_info` 인자와 겹친다고 본다. 키워드를 직접 적는다.
+- 실패 예제(17~24)는 코어가 ERROR 로그와 트레이스백을 남긴다. `serial`·`parallel` 확인은 ERROR 줄 수가
+  아니라 종료 코드·`AssertionError`·끝난 예제 수로 한다. 단, `on_error`를 준 Sender의 실패(18)는 코어가
+  ERROR를 남기지 않는다.
+- 소스 스테이지가 실패하면 `@detached`가 "스테이지가 실패했다" ERROR 줄보다 먼저 찍힌다.
+- 세션 슬롯 여럿을 함께 닫을 때(구독 끝, always 실패) unbind 순서는 실행마다 바뀐다(19·23).
+- 세션 구독이 끝날 때 상위 소스 스테이지의 `@detached`가 세션의 `@detached`보다 먼저 불린다(19).
+- `SymbolRejected`는 파생 스테이지에서도 "심볼이 실패해 구독에서 뺐다"로 남고 파생 스테이지는 내려가지
+  않는다(24).
+- 남긴 후속은 아래 api:export-model-validation-error, api:typed-subscription이다.
+- init만 등록하고 generator를 붙이지 않은 요청은 "등록되지 않은 요청"과 같은 `DomainError`다. 요청의
+  종류(`_tr_model_type`)가 generator를 등록할 때 정해지기 때문이다(26).
+- require가 없는 파생 요청은 `subscribe()`는 지나가고 첫 `update()`에서 `ModelError`다. 스테이지는
+  남지 않는다(26).
+- 느린 Sender(건당 0.3초) 하나가 있으면 같은 소스 스테이지의 빠른 소비자가 1초에 3건, 자기 큐로 떼면
+  20건을 받는다(25). `stream()`의 큐는 크기 제한이 없다.
+- `parallel`에서는 29의 파일 집계에 다른 예제의 레코드도 섞인다. 29는 예외 레코드를 자기 로거 이름으로
+  고른다.

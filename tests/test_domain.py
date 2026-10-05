@@ -109,7 +109,7 @@ async def test_stream_without_binder_raises_domain_error(domain: Domain):
 
 
 async def test_equal_requests_share_one_stage(domain: Domain):
-    """필드 값이 같은 요청은 인스턴스가 달라도 하나의 원천 스테이지를 공유한다."""
+    """필드 값이 같은 요청은 인스턴스가 달라도 하나의 소스 스테이지를 공유한다."""
 
     tag = "shared-origin"
     req_a, req_b = CounterReq(tag=tag), CounterReq(tag=tag)
@@ -132,7 +132,7 @@ async def test_equal_requests_share_one_stage(domain: Domain):
 
 
 async def test_different_field_values_get_separate_stages(domain: Domain):
-    """필드 값이 다르면 별개의 원천 스테이지를 갖는다."""
+    """필드 값이 다르면 별개의 소스 스테이지를 갖는다."""
 
     req_a, req_b = CounterReq(tag="separate-a"), CounterReq(tag="separate-b")
     rec_a, rec_b = Recorder("A"), Recorder("B")
@@ -208,8 +208,49 @@ async def test_update_replaces_symbols_and_empty_set_unsubscribes(domain: Domain
         assert log.detached == 1
 
 
+async def test_mutating_the_request_after_subscribe_does_not_leak_the_stage(domain: Domain):
+    """구독은 그 순간의 요청 내용에 묶인다. 요청을 고쳐도 `detach()`가 그 스테이지를 닫는다.
+
+    요청을 그대로 쥐고 있으면 고친 뒤의 content_id로 스테이지를 찾아, 처음 스테이지가 아무도
+    닫지 못한 채 소비자에게 계속 보낸다.
+    """
+
+    req = CounterReq(tag="mutate-before")
+    subscribed = req.tr_content_id
+    log = log_of(req)
+    recorder = Recorder()
+
+    async with domain.subscribe(req, recorder) as sub:
+        await sub.update({"BTC"})
+        await recorder.wait_for(1)
+        req.tag = "mutate-after"
+        cast(CounterReq, sub.request).tag = "mutate-after"  # 사본이라 구독에 닿지 않는다
+        await sub.update({"BTC", "ETH"})
+        assert domain.get_shared_symbols(subscribed) == {"BTC", "ETH"}
+
+    assert domain.get_shared_symbols(subscribed) == set()
+    assert log.detached == 1
+    assert log_of(CounterReq(tag="mutate-after")).inits == 0
+
+
+async def test_session_uses_the_request_as_subscribed(domain: Domain):
+    """세션은 init을 첫 `update()`에서 한다. 그 사이 요청을 고쳐도 구독한 내용으로 init한다."""
+
+    req = SwingReq(tag="session-mutate-before")
+    recorder = Recorder()
+
+    async with domain.subscribe(req, recorder) as sub:
+        req.tag = "session-mutate-after"
+        await sub.update({"BTC"})
+        await recorder.wait_for(1)
+
+    assert log_of(SwingReq(tag="session-mutate-before")).inits == 1
+    assert log_of(SwingReq(tag="session-mutate-after")).inits == 0
+    assert log_of(CounterReq(tag="session-mutate-after")).inits == 0
+
+
 async def test_stage_symbols_are_always_contained_in_the_origin_union(domain: Domain):
-    """각 스테이지의 심볼은 언제나 원천 합집합에 포함된다."""
+    """각 스테이지의 심볼은 언제나 소스 스테이지의 합집합에 포함된다."""
 
     req = CounterReq(tag="containment")
     rec_a, rec_b = Recorder("A"), Recorder("B")
@@ -232,7 +273,7 @@ async def test_stage_symbols_are_always_contained_in_the_origin_union(domain: Do
 
 
 async def test_dependent_stage_creates_and_shares_the_upstream(domain: Domain):
-    """파생 스테이지는 상위 원천을 만들어 쓰고, 끝나면 함께 정리한다."""
+    """파생 스테이지는 상위 소스 스테이지를 만들어 쓰고, 끝나면 함께 정리한다."""
 
     tag = "dependent-basic"
     req = DerivedReq(tag=tag)
@@ -255,7 +296,7 @@ async def test_dependent_stage_creates_and_shares_the_upstream(domain: Domain):
 
 
 async def test_dependent_stages_with_same_upstream_share_it(domain: Domain):
-    """상위 요청의 content_id가 같으면 파생 스테이지가 달라도 원천을 공유한다."""
+    """상위 요청의 content_id가 같으면 파생 스테이지가 달라도 소스 스테이지를 공유한다."""
 
     tag = "dependent-shared-upstream"
     upstream = CounterReq(tag=tag)
@@ -282,7 +323,7 @@ async def test_dependent_registers_the_union_upstream(domain: Domain):
     """파생 스테이지가 상위에 등록하는 심볼은 **구독자 전체의 합집합**이어야 한다.
 
     이 불변식이 깨지면 나중에 붙은 구독이 앞선 구독의 상위 등록을 덮어써, 먼저
-    구독한 쪽이 아무 오류 없이 조용히 굶는다(ex05가 회귀 테스트로 남긴 사례).
+    구독한 쪽이 아무 오류 없이 조용히 굶는다.
     """
 
     tag = "dependent-union"
@@ -324,11 +365,11 @@ async def test_dependent_restarts_only_when_the_union_changes(domain: Domain):
     """파생 스테이지도 심볼 합집합이 실제로 달라질 때만 재시작한다.
 
     `test_origin_restarts_only_when_the_union_changes`와 같은 규칙을 파생 분기에서
-    확인한다. 파생 쪽은 상위 원천까지 함께 움직이므로 두 계층의 기록을 나란히 본다.
+    확인한다. 파생 쪽은 상위 소스 스테이지까지 함께 움직이므로 두 계층의 기록을 나란히 본다.
 
     새 구독자가 데이터를 받는지도 함께 단정한다. 조기 반환이 `replace()` **뒤에**
     있어야 재시작 없이도 구독자 목록에 들어가기 때문이다. 순서가 뒤바뀌면 재시작
-    횟수는 그대로면서 새 구독자만 다음 재시작까지 굶는다. (ex06과 같은 시나리오다.)
+    횟수는 그대로면서 새 구독자만 다음 재시작까지 굶는다.
     """
 
     tag = "dependent-union-restart"
@@ -432,7 +473,7 @@ async def test_session_stage_maps_symbols_to_the_upstream(domain: Domain):
 
 
 async def test_session_stage_cleans_up_the_upstream(domain: Domain):
-    """세션 스테이지를 빠져나오면 그것이 만든 상위 원천도 함께 정리된다."""
+    """세션 스테이지를 빠져나오면 그것이 만든 상위 소스 스테이지도 함께 정리된다."""
 
     tag = "session-cleanup"
     req = SwingReq(tag=tag)
@@ -553,8 +594,8 @@ async def test_session_always_slot_is_not_unbound(domain: Domain):
 async def test_session_detaches_an_upstream_no_pipeline_uses(domain: Domain):
     """어떤 파이프라인도 쓰지 않게 된 상위 스테이지는 그 자리에서 떼어 내고 다시 건드리지 않는다.
 
-    떼어 내지 않고 남겨 두면 이후 `update()`마다 빈 심볼 집합으로 갱신되는데, 원천이
-    이미 사라진 상위는 그때마다 새 원천이 만들어졌다가(init) 곧바로 정리된다(detach).
+    떼어 내지 않고 남겨 두면 이후 `update()`마다 빈 심볼 집합으로 갱신되는데, 이미 사라진 상위
+    소스 스테이지가 그때마다 새로 만들어졌다가(init) 곧바로 정리된다(detach).
     """
 
     tag = "session-split"
@@ -579,10 +620,10 @@ async def test_session_detaches_an_upstream_no_pipeline_uses(domain: Domain):
 async def test_equal_session_requests_do_not_share_a_stage(domain: Domain):
     """내용이 같은 세션 요청은 **공유되지 않는다** — content_id가 같아도 별개다.
 
-    원천·파생은 content_id 단위로 스테이지와 컨텍스트를 공유하지만
+    소스·파생 스테이지는 content_id 단위로 스테이지와 컨텍스트를 공유하지만
     (`test_equal_requests_share_one_stage`), `_create_session_subscription()`는
     `_shared_stages`를 보지도 채우지도 않는다. 요청마다 스테이지가 생기고 init
-    콜백이 다시 불린다. 공유의 경계는 그 아래 상위 원천에 있다.
+    콜백이 다시 불린다. 공유의 경계는 그 아래 상위 소스 스테이지에 있다.
     """
 
     tag = "session-no-share"
@@ -601,7 +642,7 @@ async def test_equal_session_requests_do_not_share_a_stage(domain: Domain):
         assert domain.get_shared_symbols(req_a.tr_content_id) == set()
         assert req_a.tr_content_id not in domain._shared_stages
         assert log.inits == 2  # 요청마다 컨텍스트가 새로 만들어진다
-        assert up_log.inits == 1  # 상위 원천은 여전히 하나를 공유한다
+        assert up_log.inits == 1  # 상위 소스 스테이지는 여전히 하나를 공유한다
         assert shared_symbols(domain, upstream) == {f"BTC{QUOTE_SUFFIX}"}
         await rec_a.wait_for(2)
         await rec_b.wait_for(2)
@@ -625,10 +666,10 @@ async def test_equal_session_requests_do_not_share_a_stage(domain: Domain):
 
 
 async def test_source_failure_is_not_retried_and_notifies_every_downstream(domain: Domain):
-    """원천이 던지면 다시 세우지 않고, 원천 소비자와 그 위의 파생 소비자 모두에게 알린다.
+    """소스 generator가 던지면 다시 세우지 않고, 소스·파생 소비자 모두에게 알린다.
 
-    각 소비자는 **자기가 구독한 심볼만** 받는다. 파생 소비자의 실패는 원천의 실패에서
-    연쇄된 것이므로 `__cause__`가 원천의 `StageFailed`다.
+    각 소비자는 **자기가 구독한 심볼만** 받는다. 파생 소비자의 실패는 소스 스테이지의 실패에서
+    연쇄된 것이므로 `__cause__`가 소스 스테이지의 `StageFailed`다.
     """
 
     tag = "fail-source-cascade"
@@ -940,7 +981,7 @@ async def test_session_init_failure_is_notified_on_update(domain: Domain):
 
 
 async def test_source_symbol_rejection_fails_only_that_symbol(domain: Domain):
-    """원천이 심볼 하나를 거부하면 그 심볼을 구독한 소비자에게만, 자기 심볼만 담아 알린다.
+    """소스 binder가 심볼 하나를 거부하면 그 심볼을 구독한 소비자에게만, 자기 심볼만 담아 알린다.
 
     스테이지는 내려가지 않고 남은 심볼로 한 번 다시 시작한다. 다시 넣으면 binder가 다시 판단한다.
     """

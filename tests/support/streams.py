@@ -2,7 +2,7 @@
 
 `BindPack._registry`는 프로세스 전역이라 **요청 타입 하나당 등록은 한 번뿐**이다.
 그래서 binder는 이 모듈에서 import 시점에 한 번만 정의하고, 테스트끼리는 `tag` 필드
-값을 달리해 서로 다른 content_id(=서로 다른 원천 스테이지)를 쓰는 방식으로 격리한다.
+값을 달리해 서로 다른 content_id(=서로 다른 소스 스테이지)를 쓰는 방식으로 격리한다.
 같은 `tag`를 쓰는 두 테스트는 스테이지와 기록을 공유하게 되므로 주의할 것.
 
 각 binder는 자기 스테이지에서 일어난 일을 `StreamLog`에 기록한다. generator가 언제
@@ -79,11 +79,11 @@ class StreamContext:
         self.log.inits += 1
 
 
-# ===== 원천 제너레이터 =====
+# ===== 소스 제너레이터 =====
 
 
 class CounterReq(SourceRequest):
-    """`tag`로 원천 스테이지를 구분하는 카운트 요청."""
+    """`tag`로 소스 스테이지를 구분하는 카운트 요청."""
 
     tag: str
 
@@ -96,7 +96,7 @@ class CounterData(DataModel):
 
 @initialize
 def counter(req: CounterReq) -> StreamContext:
-    """카운트 원천의 공유 컨텍스트를 만든다."""
+    """카운트 소스 스테이지의 공유 컨텍스트를 만든다."""
 
     return StreamContext(req)
 
@@ -222,7 +222,7 @@ async def _(ctx: StreamContext):
 
 # ===== 세션(SessionRequest) 스트림 =====
 #
-# `SessionRequest`는 심볼마다 `Pipeline`을 만들어 상위 원천에 붙이는 요청이다. 상위에
+# `SessionRequest`는 심볼마다 `Pipeline`을 만들어 상위 소스 스테이지에 붙이는 요청이다. 상위에
 # 등록되는 심볼은 파이프라인이 요구한 표기(`BTC/USD`)이고 소비자가 받는 심볼은 하위
 # 표기(`BTC`)다. 이 둘을 **일부러 다르게** 두어야 상·하위를 뒤바꾼 회귀가 드러난다.
 
@@ -356,7 +356,7 @@ async def _(ctx: StreamContext, symbol: str):
 # ===== 실패를 주입하는 스트림 =====
 #
 # 코어는 재시도하지 않고 실패를 `StageFailed`로 알린다. 아래 binder는 그 경로를 시험하려고
-# 일부러 던진다. 원천이 던지는 시점은 `trip()`으로 정해 경합 없이 재현한다.
+# 일부러 던진다. 소스 generator가 던지는 시점은 `trip()`으로 정해 경합 없이 재현한다.
 
 
 class InjectedFailure(RuntimeError):
@@ -367,7 +367,7 @@ _tripped: set[str] = set()
 
 
 def trip(tag: str) -> None:
-    """`tag`의 `FlakyReq` 원천이 다음 바퀴에 한 번 던지게 한다."""
+    """`tag`의 `FlakyReq` 소스 generator가 다음 바퀴에 한 번 던지게 한다."""
 
     _tripped.add(tag)
 
@@ -408,7 +408,7 @@ def _raise_if_rejected(key: str) -> None:
 
 
 class FlakyReq(SourceRequest):
-    """`trip(tag)`되면 한 번 던지는 원천 요청. 그 전까지는 `CounterReq`처럼 발행한다."""
+    """`trip(tag)`되면 한 번 던지는 소스 요청. 그 전까지는 `CounterReq`처럼 발행한다."""
 
     tag: str
     detach_raises: bool = False
@@ -416,7 +416,7 @@ class FlakyReq(SourceRequest):
 
 @initialize
 def flaky(req: FlakyReq) -> StreamContext:
-    """끊기는 원천의 공유 컨텍스트를 만든다. `refuse_init()`되면 던진다."""
+    """끊기는 소스 스테이지의 공유 컨텍스트를 만든다. `refuse_init()`되면 던진다."""
 
     return _init_or_refuse(req)
 
@@ -432,7 +432,7 @@ async def _(ctx: StreamContext, symbols: set[str]):
         while True:
             if tag in _tripped:
                 _tripped.discard(tag)
-                raise InjectedFailure(f"원천이 끊겼다. - {tag}")
+                raise InjectedFailure(f"소스 스트림이 끊겼다. - {tag}")
             _raise_if_rejected(tag)
             for symbol in sorted(symbols):
                 yield CounterData(symbol=symbol, count=count)
@@ -464,7 +464,7 @@ def _(req: FlakyDerivedReq) -> FlakyReq:
 
 @initialize
 def flaky_derived(req: FlakyDerivedReq) -> StreamContext:
-    """끊기는 원천 위의 파생 스테이지 컨텍스트를 만든다."""
+    """끊기는 소스 스테이지 위의 파생 스테이지 컨텍스트를 만든다."""
 
     return StreamContext(req)
 
@@ -504,7 +504,7 @@ def _(req: FlakyMappedReq, symbols: set[str]) -> tuple[FlakyReq, set[str]]:
 
 @initialize
 def flaky_mapped(req: FlakyMappedReq) -> StreamContext:
-    """끊기는 원천 위의 심볼 변환 파생 스테이지 컨텍스트를 만든다."""
+    """끊기는 소스 스테이지 위의 심볼 변환 파생 스테이지 컨텍스트를 만든다."""
 
     return StreamContext(req)
 
@@ -651,7 +651,7 @@ class FlakySwingReq(SessionRequest):
 
 @initialize
 def flaky_swing(req: FlakySwingReq) -> StreamContext:
-    """끊기는 원천 하나를 공유하는 세션 스테이지의 컨텍스트를 만든다."""
+    """끊기는 소스 스테이지 하나를 공유하는 세션 스테이지의 컨텍스트를 만든다."""
 
     return StreamContext(req)
 

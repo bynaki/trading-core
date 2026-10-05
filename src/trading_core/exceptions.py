@@ -43,7 +43,7 @@ class StageFailed(Exception):
 
 
 class SymbolRejected(Exception):
-    """원천·파생 binder가 `symbols`를 줄 수 없다고 알릴 때 generator에서 던진다.
+    """소스·파생 binder가 `symbols`를 줄 수 없다고 알릴 때 generator에서 던진다.
 
     상장 폐지나 없는 심볼처럼 심볼 하나 때문에 스테이지 전체를 내리지 않으려고 쓴다. 코어는 그
     심볼만 구독에서 빼 구독한 소비자에게 알리고, 남은 심볼로 generator를 다시 띄운다. 다른 예외는

@@ -10,6 +10,8 @@ WebSocket 클라이언트가 아니라, 실시간 스트림을 다룰 때 반복
 구독 · 파싱은 사용자가 binder로 구현한다.
 
 문서·주석·docstring·예외 메시지는 **한국어**로 작성한다. 기존 스타일을 따를 것.
+`SourceRequest`는 "소스 요청"이라 부르고, "소스"는 혼자 쓰지 않고 "소스 스테이지"·"소스 generator"처럼
+명사를 붙인다(혼자 쓰면 소스코드로 읽힌다).
 
 ## 새 세션을 시작할 때
 
@@ -49,31 +51,38 @@ pyright / pytest)를 모두 통과시킨다. 문서만 고쳤으면 돌리지 �
 테스트는 예제를 돌리지 않으므로 `src/`를 고쳤으면 `uv run examples/main.py serial`도 돌려 볼 것.
 
 ```bash
-uv run python examples/ex01/run_ex.py # 예제 파일을 직접 실행 (자체 Domain을 만든다)
-uv run examples/main.py ex01          # 예제 이름으로 실행
-uv run examples/main.py serial        # 모든 예제를 공유 Domain에서 순차 실행
-uv run examples/main.py parallel      # 모든 예제를 공유 Domain에서 동시 실행
+uv run examples/ex01_stream.py   # 예제 파일을 직접 실행 (자체 Domain을 만든다)
+uv run examples/main.py ex01     # 예제 번호로 실행
+uv run examples/main.py serial   # 모든 예제를 공유 Domain에서 순차 실행
+uv run examples/main.py parallel # 모든 예제를 공유 Domain에서 동시 실행
 ```
 
-`examples/main.py`는 `examples/*/run_ex.py`를 글롭으로 찾는다 — `run_ex(domain)` 코루틴을 가진
-디렉터리를 추가하면 자동으로 포함된다. 의존성: `uv add <pkg>`(런타임) / `uv add --dev <pkg>`(개발).
+`examples/main.py`는 `examples/exNN_이름.py`를 글롭으로 찾는다 — `run_ex(domain)` 코루틴을 가진
+파일을 추가하면 자동으로 포함된다. 의존성: `uv add <pkg>`(런타임) / `uv add --dev <pkg>`(개발).
 
 ## 저장소 메모
 
 - `README.md`는 **의도적으로 얇다** — 소개·설치·예제 실행법·범위와 한계만 둔다. API가 아직
   자리 잡는 중이라 **코드 예제와 API 이름을 넣지 않는다.** 사용법은 실행되는 `examples/`가 맡는다.
-- 예제를 고치면 같은 디렉터리의 README도 함께 고친다.
+- 예제는 기능·사건 하나에 파일 하나(`examples/exNN_이름.py`, ex01~ex29)다. 예제별 README는 없고
+  설명은 모듈 docstring(배우는 것·실행·기대 출력·다음 예제)에 둔다. 목차는 `examples/README.md`
+  하나다. 예제를 고치면 그 docstring의 기대 출력과, 주제가 바뀌면 목차도 함께 고친다.
+- 예제는 정상/회귀 판정표 대신 핵심 지점에 `assert`를 둔다. `serial`·`parallel`이 회귀를 잡는다.
+  4부(ex17~24)는 실패를 일부러 내므로 코어의 ERROR 로그와 트레이스백이 나온다. 그래서 확인은
+  ERROR 줄 수가 아니라 종료 코드·`AssertionError`·끝난 예제 수로 한다.
+- 기대 출력이 실행마다 같도록, 순서가 중요한 세션 예제는 심볼을 하나씩 `update()`한다(여럿을 한
+  번에 넣으면 bind 순서가 실행마다 바뀐다). 주제가 아닌 재시작 로그는 남기지 않는다.
 - 운영·설계 문서는 `docs/`에 있다: `plan.md`, `done.md`, `log.spec.md`(로그 모듈 설계),
   `naming.spec.md`(이름 정리 내역), 있을 때만 `HANDOFF.md`.
-- 예제는 ex01~ex12. ex06은 파생 스테이지의 "합집합이 그대로면 재시작 안 함", ex07·ex08은
-  세션 요청(ex08은 세션 스테이지가 content_id로 공유되지 **않음**), ex09는 로그 모듈, ex10은
-  콜백이 던질 때의 실패 정책(`StageFailed`·`on_error`), ex11은 init 콜백이 던질 때, ex12는
-  binder가 심볼 하나를 거부할 때(`SymbolRejected`)다.
+- 예제의 묶음: 01~06 소스 요청의 기본, 07~10 파생 요청, 11~16 세션 요청(13은 세션이 content_id로
+  공유되지 **않음**), 17~24 실패(`StageFailed`·`on_error`·`SymbolRejected`), 25 느린 소비자,
+  26 등록 실수, 27 식별자·가변 모델, 28 직렬화, 29 로그 모듈.
 - 예제 출력은 모두 `trading_core.logger`로 남긴다(`print` 없음). 공용 설정은
-  `examples/setting.toml`이고 `main.py`와 각 `run_ex.py`의 `main()`이 `configure()`한다. 로거
-  이름은 `__name__`이 아니라 `"ex05.origin"`처럼 직접 준다 — 직접 실행하면 `__main__`이 되어 어느
-  예제인지 안 보인다. `get_logger(__name__)` 관용구를 보이는 ex09만 예외다.
-- ex09만 자기 `setting.toml`로 재구성했다가 끝에 공용 설정으로 **다시 `configure()`해** 되돌린다.
+  `examples/setting.toml`이고 `main.py`와 각 예제의 `main()`이 `configure()`한다. 로거
+  이름은 `__name__`이 아니라 `"ex05.tick"`처럼 직접 준다 — 직접 실행하면 `__main__`이 되어 어느
+  예제인지 안 보인다. `get_logger(__name__)` 관용구를 보이는 ex29만 예외다.
+- ex29만 자기 설정(`examples/ex29_logging.toml`)으로 재구성했다가 끝에 공용 설정으로 **다시
+  `configure()`해** 되돌린다.
   `shutdown()`하면 그 뒤로 도는 예제의 로그가 어디로도 안 나간다.
 - `playground.py`는 타입 실험용 스크래치 파일이다. 정식 예제가 아니다.
 
@@ -97,7 +106,7 @@ uv run examples/main.py parallel      # 모든 예제를 공유 Domain에서 동
 ```
 TrBaseModel
 ├── BaseRequest            (_tr_model_type = "unregistered")
-│   ├── SourceRequest      → 바인드되면 "source"   (원천)
+│   ├── SourceRequest      → 바인드되면 "source"   (소스 요청)
 │   ├── DerivedRequest     → 바인드되면 "derived"  (파생. require로 상위 요청 선언)
 │   └── SessionRequest     → 바인드되면 "session"  (세션. 상태를 가져 공유하지 않음)
 └── DataModel              (_tr_model_type = "data", symbol: str 라우팅 키)
@@ -122,7 +131,9 @@ TrBaseModel
 모델은 **가변**이고 `__setattr__`이 content_id 캐시를 무효화한다. 그래서 hashable이 아니다 —
 `set`·dict 키로 쓰지 말고 content_id를 키로 쓴다. 직렬화 시 `tr_annotation`이 붙고,
 `load_model()`은 그 `module_name`/`model_name`으로 클래스를 되찾아 복원한다(`parse_dump()`는 덤프만
-검증한다).
+검증한다). 가변이라 `Domain`은 구독할 때 요청을 **사본으로 찍어 둔다**(`_create_subscription()`).
+구독한 뒤 호출자가 요청을 고쳐도 구독은 처음 내용에 묶여 있고, `Subscription.request`도 사본을 준다.
+안 그러면 바뀐 content_id로 스테이지를 찾아 처음 스테이지가 닫히지 않는다.
 
 ### 등록 (binder.py)
 
@@ -166,28 +177,28 @@ async def _(ctx: NamingAllContext): ...
 
 핵심 불변식:
 
-1. **content_id 단위 공유** — 원천·파생은 `_shared_stages[content_id]`에 `SharedStage`가 하나만 있다.
+1. **content_id 단위 공유** — 소스·파생 스테이지는 `_shared_stages[content_id]`에 `SharedStage`가 하나만 있다.
    같은 요청의 소비자들은 컨텍스트와 generator를 공유한다. 세션 요청은 공유하지 않는다.
 2. **심볼 합집합** — `SymbolRouter`가 (Sender, symbols)를 모아 binder에는 **합집합**만 넘기고,
    출력은 `data.symbol`을 구독한 Sender에게만 fan-out한다.
 3. **합집합이 바뀔 때만 재시작** — `current_symbols == active_symbols`면 `update()`는 즉시 반환한다.
    달라지면 태스크를 이름으로 취소하고(generator는 `pump()`가 `aclosing`으로 닫는다) 새 generator를
-   만든다(원천·파생 한정).
+   만든다(소스·파생 스테이지 한정).
 4. **두 개의 정리 지점** — binder의 `finally`는 구독 업데이트 단위, `@x.detached`는 스테이지 전체.
    합집합이 비면 스테이지를 dict에서 빼고 detach 콜백을 부른다.
 5. **`update(symbols)`는 교체다**(`SymbolRouter.replace()`). 빈 집합을 넘기면 그 소비자의 구독이 사라진다.
 6. **bind ↔ unbind 짝** — 세션에서 `bind_cb`로 연 심볼은 `update()`로 빠지든 `detach()`로 닫히든
    `unbind_cb`가 **정확히 한 번** 불린다(`unbind_symbols()` 공유). 슬롯 닫기(`close_slots()`)는 슬롯
    태스크의 이름 해제까지 기다린다.
-7. **실패는 재시도하지 않고 심볼 단위로 알린다** — init 콜백·generator(원천·파생)·파이프라인·bind
+7. **실패는 재시도하지 않고 심볼 단위로 알린다** — init 콜백·소스·파생 generator·파이프라인·bind
    콜백·소비자 `Sender`가 던지면 그 스테이지나 슬롯을 내리고(init이면 세우지 않고), 영향받은 소비자에게
    **자기 심볼만** 담은 `StageFailed`를 `on_error`로 알린다. `update()`·`subscribe()`는 던지지 않는다.
-   원천·파생 스테이지가 실패하면(init 실패 포함) 그 스테이지를 상위로 둔 파생·세션 슬롯으로 연쇄한다
+   소스·파생 스테이지가 실패하면(init 실패 포함) 그 스테이지를 상위로 둔 파생·세션 슬롯으로 연쇄한다
    (`__cause__`가 상위의 `StageFailed`). `Sender` 하나가 던지면 그 Sender만 떼고
    공유 generator는 계속 돈다. 실패한 심볼은 구독에서 빠지고, `update()`로 다시 넣으면 새 스테이지가
    init부터 선다. 버틸지(재연결 등)는 binder가 generator 안에서 정한다. 세션도 공유 스테이지처럼
    init을 첫 `update()`에서 한다. binder 누락 같은 등록 오류(`DomainError`)는 지금처럼 호출자에게 간다.
-   원천·파생 generator가 `SymbolRejected(symbols)`를 던지면 스테이지를 내리지 않고 그 심볼만 구독에서
+   소스·파생 generator가 `SymbolRejected(symbols)`를 던지면 스테이지를 내리지 않고 그 심볼만 구독에서
    빼 알리고, 남은 심볼로 다시 띄운다(`fail_symbols()`). 파생은 상위의 실패 심볼을 하위 심볼로
    되돌려(`fail_upstream_symbols()`, 하위 심볼마다 `resolve_upstream({s})`) 그것만 뺀다. 구독되지 않은
    심볼만 거부하면 같은 합집합으로 끝없이 다시 띄우지 않도록 스테이지 전체의 실패로 본다.
@@ -209,9 +220,9 @@ async def _(ctx: NamingAllContext): ...
 
 #### 세션 (SessionRequest)
 
-원천·파생이 "심볼 집합 하나 → generator 하나"라면, 세션은 **심볼마다 슬롯 하나**를 만들고 각
-슬롯이 `Pipeline`으로 상위 원천에 붙는다(`Domain._create_session_subscription()`, 예: ex07, 테스트의
-`SwingReq`). 차트 분석처럼 상태를 가지므로 content_id가 같아도 공유하지 않는다(ex08).
+소스·파생 스테이지가 "심볼 집합 하나 → generator 하나"라면, 세션은 **심볼마다 슬롯 하나**를 만들고 각
+슬롯이 `Pipeline`으로 상위 소스 스테이지에 붙는다(`Domain._create_session_subscription()`, 예: ex11, 테스트의
+`SwingReq`). 차트 분석처럼 상태를 가지므로 content_id가 같아도 공유하지 않는다(ex13).
 
 ```python
 @swing                                   # bind — 심볼 하나의 Pipeline을 yield
@@ -226,7 +237,7 @@ async def _(ctx: SwingCtx):
     yield TickReq()("HEARTBEAT/USD") | ...
 ```
 
-**상위 표기와 하위 표기를 구분한다.** `req(symbol)`의 `symbol`은 상위 표기(원천이 아는 `"BTC/USD"`,
+**상위 표기와 하위 표기를 구분한다.** `req(symbol)`의 `symbol`은 상위 표기(소스 스테이지가 아는 `"BTC/USD"`,
 `Pipeline.upstream_symbol`), bind 콜백이 받는 `symbol`은 하위 표기(소비자가 구독한 `"BTC"`)다.
 상·하위가 같은 요청으로만 시험하면 둘을 뒤바꾼 버그가 안 드러난다.
 
@@ -236,7 +247,7 @@ async def _(ctx: SwingCtx):
 - `UpstreamRouters`는 content_id별로 `SymbolRouter` **객체** 하나를 유지한다(`Sender` 동일성 검사 때문).
   `clear()`는 라우터만 비우고, 다시 채운 뒤 `prune()`이 센더 없는 항목을 지우며 그 상위 구독을
   같은 `update()`에서 떼어 낸다.
-- 데이터 흐름: 원천 → `SymbolRouter`(상위 표기) → `PipelineSender` → 슬롯 `Channel` →
+- 데이터 흐름: 소스 스테이지 → `SymbolRouter`(상위 표기) → `PipelineSender` → 슬롯 `Channel` →
   `_run_pipeline_slot()`이 `pipeline.invoke()`를 거쳐 소비자에게.
 - 슬롯은 상위 구독 갱신보다 먼저 닫히므로, 닫힌 슬롯으로 온 데이터의 `ChannelClosed`는
   `PipelineSender`가 삼킨다. 올려 보내면 공유된 상위 generator가 죽는다.
@@ -279,7 +290,7 @@ DEBUG 로그를, 예외 훅은 ERROR 로그를 남긴다(태스크까지 새어 
 
 | 파일 | 덮는 범위 |
 | --- | --- |
-| `tests/support/streams.py` | 테스트 전용 모델·binder(원천 · 파생 · 심볼 변환 파생 · 세션 셋 · 실패 주입)와 스테이지 사건 기록 |
+| `tests/support/streams.py` | 테스트 전용 모델·binder(소스 요청 · 파생 · 심볼 변환 파생 · 세션 셋 · 실패 주입)와 스테이지 사건 기록 |
 | `tests/support/harness.py` | `Recorder`(Sender 구현), 느린 소비자 `BlockingRecorder`, 던지는 `FailingRecorder`, `on_error` 기록 `Failures`, `wait_until()` |
 | `tests/conftest.py` | `domain` 픽스처(시작 → 테스트 → `stop()`) |
 | `tests/test_model.py` | 식별자 3종, content_id 캐시 무효화, `load_model`·`cast_model` 왕복, `Pipeline` |
@@ -295,15 +306,16 @@ DEBUG 로그를, 예외 훅은 ERROR 로그를 남긴다(태스크까지 새어 
 | 불변식 | 테스트 | 주의 |
 | --- | --- | --- |
 | 파생이 상위에 등록하는 심볼 = 구독자 합집합 | `test_dependent_registers_the_union_upstream` | |
-| 합집합이 그대로면 재시작 안 함 | `test_origin_restarts_only_when_the_union_changes`, `test_dependent_restarts_only_when_the_union_changes` | 후자는 ex06 시나리오 |
+| 합집합이 그대로면 재시작 안 함 | `test_origin_restarts_only_when_the_union_changes`, `test_dependent_restarts_only_when_the_union_changes` | |
 | 상·하위 표기 매핑 | `test_session_stage_maps_symbols_to_the_upstream` | 표기가 **다른** `SwingReq`(`BTC`→`BTC/USD`)라야 잡힌다 |
 | bind↔unbind 정확히 한 번 | `test_session_unbinds_each_symbol_exactly_once` | 〃 |
 | 센티널 슬롯은 unbind 안 함 | `test_session_always_slot_is_not_unbound` | 〃 |
+| 구독 뒤 요청을 고쳐도 스테이지가 새지 않음 | `test_mutating_the_request_after_subscribe_does_not_leak_the_stage`, `test_session_uses_the_request_as_subscribed` | |
 | 빼자마자 재구독 가능 | `test_session_symbol_can_be_resubscribed_right_away` | `BlockingRecorder`로 슬롯 태스크를 묶어야 드러난다 |
 | 안 쓰이는 상위를 떼어 냄 | `test_session_detaches_an_upstream_no_pipeline_uses` | 심볼마다 다른 상위를 드는 `SplitReq` |
 | 닫힌 슬롯이 상위를 죽이지 않음 | `test_pipeline_sender_drops_data_for_a_closed_slot` | 경합이라 단위 테스트로 고정 |
-| 세션 스테이지는 content_id로 공유 안 함 | `test_equal_session_requests_do_not_share_a_stage` | ex08 시나리오. 짝: `test_equal_requests_share_one_stage` |
-| 실패는 재시도 없이 하위 전체로 연쇄 | `test_source_failure_is_not_retried_and_notifies_every_downstream` | 원천 실패 시점은 `trip(tag)`로 정한다 |
+| 세션 스테이지는 content_id로 공유 안 함 | `test_equal_session_requests_do_not_share_a_stage` | ex13 시나리오. 짝: `test_equal_requests_share_one_stage` |
+| 실패는 재시도 없이 하위 전체로 연쇄 | `test_source_failure_is_not_retried_and_notifies_every_downstream` | 소스 generator의 실패 시점은 `trip(tag)`로 정한다 |
 | Sender 하나의 실패를 격리 | `test_failing_sender_does_not_stop_other_consumers`, `test_symbol_router_isolates_a_failing_sender` | |
 | 세션 실패는 하위 표기 심볼 하나만 | `test_session_slot_failure_fails_only_that_symbol`, `test_session_upstream_failure_fails_the_slots_using_it` | 표기가 다른 요청이라야 잡힌다 |
 | 정리 콜백이 던져도 정리를 끝냄 | `test_cleanup_callback_failure_does_not_break_detach` | 형제 `unbind_cb`가 모두 불리는지까지 본다 |

@@ -59,7 +59,8 @@ class BaseStage[T: BaseRequest]:
 
     @property
     def request(self) -> T:
-        return self._request
+        """구독할 때 찍어 둔 요청의 사본. 고쳐도 구독에는 영향이 없다."""
+        return self._request.model_copy(deep=True)
 
 
 class Subscription[T: BaseRequest](BaseStage[T]):
@@ -82,7 +83,7 @@ class Subscription[T: BaseRequest](BaseStage[T]):
 
 
 class SharedStage[T: BaseRequest](BaseStage[T]):
-    """content_id가 같은 원천·파생 요청이 공유하는 스테이지."""
+    """content_id가 같은 소스·파생 요청이 공유하는 스테이지."""
 
     def __init__(self, key: _StageCreationKey, /, id: str, request: T) -> None:
         super().__init__(key, id, request)
@@ -459,7 +460,7 @@ class Domain:
         slot_channels: dict[str, Channel[tuple[DataModel, Pipeline]]] = {}
         slot_senders: dict[str, set[PipelineSender]] = {}
         upstream_routers = UpstreamRouters()
-        upstream_subs: set[Subscription] = set()
+        upstream_subs: dict[str, Subscription] = {}  # 상위 content_id → 상위 구독
         update_lock = Lock()
 
         async def notify(symbols: set[str], exc: Exception):
@@ -528,30 +529,31 @@ class Domain:
             for senders in slot_senders.values():
                 for pipeline_sender in senders:
                     upstream_routers.add_sender(pipeline_sender.pipeline.upstream, pipeline_sender)
-            current_subs: set[Subscription] = set()
+            current_subs: dict[str, Subscription] = {}
             updating: list[tuple[Subscription, set[str]]] = []
             # 어떤 파이프라인도 쓰지 않게 된 상위는 여기서 빠져 `current_subs`에 들지 않고
-            # 아래에서 떼어진다. 남겨 두면 매 갱신마다 빈 집합으로 `update()`되어, 원천이
-            # 이미 사라진 상위가 그때마다 새로 만들어졌다(init) 곧바로 정리된다.
+            # 아래에서 떼어진다. 남겨 두면 매 갱신마다 빈 집합으로 `update()`되어, 이미
+            # 사라진 상위 소스 스테이지가 그때마다 새로 만들어졌다(init) 곧바로 정리된다.
             upstream_routers.prune()
             for route in upstream_routers:
-                upstream_sub: Subscription | None = None
-                for active in upstream_subs:
-                    if active.request.tr_content_id == route.upstream.tr_content_id:
-                        if active.sender != route.router:
-                            raise DomainError("불변 조건의 오류: 두 `Sender`는 같은 객체여야 한다.")
-                        upstream_sub = active
-                        break
+                upstream_sub = upstream_subs.get(route.content_id)
                 if upstream_sub is None:
                     upstream_sub = self._create_subscription(
                         route.upstream, route.router, on_upstream_failed
                     )
-                current_subs.add(upstream_sub)
+                elif upstream_sub.sender != route.router:
+                    raise DomainError("불변 조건의 오류: 두 `Sender`는 같은 객체여야 한다.")
+                current_subs[route.content_id] = upstream_sub
                 # 상위에 등록할 심볼은 파이프라인이 요구한 상위 표기(`upstream_symbol`)다.
                 # 이 구독이 받은 하위 심볼이 아니다.
                 updating.append((upstream_sub, route.router.symbols))
             await self._run_cleanups(
-                "상위 구독 해제", [detaching.detach() for detaching in upstream_subs - current_subs]
+                "상위 구독 해제",
+                [
+                    detaching.detach()
+                    for content_id, detaching in upstream_subs.items()
+                    if content_id not in current_subs
+                ],
             )
             async with TaskGroup() as tg:
                 for upstream_sub, upstream_symbols in updating:
@@ -660,7 +662,8 @@ class Domain:
                     await unbind_symbols(set(slot_channels) - {_ALWAYS_SLOT})
                     await close_slots(set(slot_channels))  # 남은 것은 `_ALWAYS_SLOT` 슬롯뿐이다
                     await self._run_cleanups(
-                        "상위 구독 해제", [upstream_sub.detach() for upstream_sub in upstream_subs]
+                        "상위 구독 해제",
+                        [upstream_sub.detach() for upstream_sub in upstream_subs.values()],
                     )
                     upstream_subs.clear()
                     if detach_cb and ctx is not None:
@@ -675,6 +678,10 @@ class Domain:
     def _create_subscription(
         self, req: BaseRequest, sender: Sender, on_error: OnError | None = None
     ):
+        # 요청은 가변이다. 호출자가 구독한 뒤 요청을 고치면 content_id가 바뀌어 `detach()`가
+        # 엉뚱한 스테이지를 찾고, 처음 스테이지는 아무도 닫지 못한 채 계속 돈다. 구독은
+        # 이 순간의 내용에 묶이도록 사본을 쓴다.
+        req = req.model_copy(deep=True)
         if is_source(req) or is_derived(req):
             return self._create_shared_subscription(req, sender, on_error)
         if is_session(req):
