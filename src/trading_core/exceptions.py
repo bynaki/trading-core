@@ -1,7 +1,12 @@
 class ModelError(Exception): ...
 
 
-class ModelValidationError(Exception): ...
+class ModelValidationError(Exception):
+    """덤프나 모델이 기대한 모델로 검증되지 않았다(`parse_dump`·`load_model`·`cast_model`).
+
+    `ModelError`(코드를 잘못 쓴 것)와 달리 받은 입력이 맞지 않는 것이다. 받는 쪽은 이것을 잡고 그
+    메시지만 건너뛸 수 있다.
+    """
 
 
 class BindError(Exception): ...

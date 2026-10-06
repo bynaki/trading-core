@@ -18,6 +18,7 @@ from trading_core.exceptions import (
     BindError,
     ChannelClosed,
     DomainError,
+    ModelValidationError,
     StageFailed,
     SymbolRejected,
 )
@@ -61,6 +62,7 @@ __all__ = [
     "Domain",
     "DomainError",
     "ModelError",
+    "ModelValidationError",
     "Pipeline",
     "Receiver",
     "Runnable",

@@ -8,6 +8,7 @@ import pytest
 from trading_core import (
     DataModel,
     ModelError,
+    ModelValidationError,
     SourceRequest,
     cast_model,
     get_model_created_by,
@@ -21,7 +22,6 @@ from trading_core import (
     parse_dump,
     set_instance_id,
 )
-from trading_core.exceptions import ModelValidationError
 from trading_core.logger import Identity
 from trading_core.model import get_instance_id
 

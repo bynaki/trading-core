@@ -57,6 +57,7 @@ from trading_core import (
     DataModel,
     Domain,
     ModelError,
+    ModelValidationError,
     SourceRequest,
     cast_model,
     get_instance_id,
@@ -69,7 +70,6 @@ from trading_core import (
     parse_dump,
     set_instance_id,
 )
-from trading_core.exceptions import ModelValidationError
 from trading_core.logger import configure, get_logger
 
 SETTINGS = Path(__file__).resolve().parent / "setting.toml"

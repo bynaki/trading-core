@@ -5,7 +5,7 @@
 > 열린 항목과 관련이 없어진 것은 `docs/done.md`로 옮기고 여기서 지운다(상세 규칙은 `AGENTS.md`
 > "새 세션을 시작할 때" 참고).
 
-> 열린 과제는 logger:server-transport, api:export-model-validation-error, api:typed-subscription이다.
+> 열린 과제는 logger:server-transport, api:typed-subscription이다.
 
 ### [done] logger:core
 프로젝트 전반 로그 모듈(`logger.py`). 설계는 `docs/log.spec.md`에 있다. `setting.toml`의 `[log]`
@@ -26,10 +26,12 @@
 채로 이 항목을 그대로 두면 `configure()`가 `LogConfigError`로 fail-fast하므로, 정책 미정 상태에서도
 "조용히 안 나가는" 사고는 나지 않는다.
 
-### api:export-model-validation-error
+### [done] api:export-model-validation-error
 `ModelValidationError`(`cast_model()`·`load_model()`·`parse_dump()`가 던진다)를 최상위 `trading_core`에서
-내보내지 않는다. 사용자가 잡으려면 `trading_core.exceptions`에서 import해야 하고, ex28이 그렇게 한다.
-`ModelError`·`BindError` 등은 최상위에 있으므로 함께 내보낼지 정한다. 내보내면 ex28의 import를 고친다.
+내보낸다. ex28·`tests/test_model.py`가 최상위에서 import한다. `ModelError`의 하위 클래스로 묶지 않았다 —
+`ModelError`는 코드를 잘못 쓴 것, `ModelValidationError`는 받은 입력이 맞지 않는 것이라
+`except ModelError`가 깨진 입력까지 삼키면 안 된다. `TaskManagerError`(`TaskManager`가 비공개)와
+`LogConfigError`(로그 API가 `trading_core.logger` 하위 모듈)는 내보내지 않는다.
 
 ### api:typed-subscription
 `Domain.subscribe()`가 돌려주는 `Subscription`의 `request`가 `BaseRequest`로만 타입이 잡힌다
