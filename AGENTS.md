@@ -277,9 +277,9 @@ DEBUG 로그를, 예외 훅은 ERROR 로그를 남긴다(태스크까지 새어 
 - ruff: line-length 100, rules `E,F,I,UP,B`. pyright `standard`, `src`/`tests`/`examples` 포함.
 - 런타임 의존성은 pydantic 하나뿐이다. 새 런타임 의존성을 추가하기 전에 확인할 것.
 - 커밋 메시지는 Conventional Commits(`feat:`, `fix:`, `docs:`)를 쓴다.
-- **커밋은 사용자가 요청하고 승인했을 때만 한다.** 절차는 프로젝트 스킬
+- **커밋은 사용자가 요청했을 때만 한다.** 절차는 프로젝트 스킬
   `.claude/skills/commit/SKILL.md`(`/commit`)를 따른다: plan→done 이관 → 개인정보·보안 검사 →
-  보고·승인 → 커밋. 스킬을 쓸 수 없는 에이전트도 이 파일을 읽고 같은 순서를 지킨다.
+  이상 없으면 커밋하고 보고(이상 있으면 커밋하지 않고 보고). 스킬을 쓸 수 없는 에이전트도 이 파일을 읽고 같은 순서를 지킨다.
 - `async for x in cb(...): yield x`로 async generator를 감쌀 때는 `contextlib.aclosing`으로 감싼다.
   안 그러면 바깥을 `aclose()`해도 **안쪽 generator의 `finally`가 돌지 않는다.**
 
