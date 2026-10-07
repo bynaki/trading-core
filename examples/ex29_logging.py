@@ -70,6 +70,8 @@
   되어 어느 예제의 줄인지 안 보이기 때문이다. 이 예제만 `get_logger(__name__)` 관용구를 보인다.
 
 설계는 `docs/log.spec.md`, 모든 설정 키의 설명은 저장소 루트의 `setting.example.toml`에 있다.
+
+다음: ex30_data_types.py — 요청 하나가 여러 종류의 데이터를 줄 때
 """
 
 import asyncio

@@ -14,7 +14,8 @@ trading-core를 쓰는 일은 두 쪽으로 나뉜다.
   등록한다. 그 binder를 데코레이터로 쓰면(`@tick`) generate 콜백이 등록된다.
 - generate 콜백은 구독 심볼 집합을 받아 데이터를 끝없이 `yield`하는 async generator다.
 - 소비자는 `Domain.start()` → `domain.stream(요청, 심볼)` → `Domain.stop()` 순서로 쓴다.
-- `stream()`이 주는 데이터의 타입은 `DataModel`이다. `cast_model()`로 실제 타입으로 좁힌다.
+- `stream()`이 주는 데이터의 타입은 `DataModel`이다. `cast_model()`로 실제 타입으로 좁힌다(종류가
+  여럿이면 ex30처럼 `match`로 가른다).
 
 실행
     uv run examples/ex01_stream.py

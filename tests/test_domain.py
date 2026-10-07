@@ -5,11 +5,12 @@
 """
 
 from asyncio import timeout
-from typing import Any, cast
+from typing import Any, assert_type, cast
 
 import pytest
 
 from trading_core import (
+    DataModel,
     Domain,
     DomainError,
     StageFailed,
@@ -224,13 +225,28 @@ async def test_mutating_the_request_after_subscribe_does_not_leak_the_stage(doma
         await sub.update({"BTC"})
         await recorder.wait_for(1)
         req.tag = "mutate-after"
-        cast(CounterReq, sub.request).tag = "mutate-after"  # 사본이라 구독에 닿지 않는다
+        sub.request.tag = "mutate-after"  # 사본이라 구독에 닿지 않는다
         await sub.update({"BTC", "ETH"})
         assert domain.get_shared_symbols(subscribed) == {"BTC", "ETH"}
 
     assert domain.get_shared_symbols(subscribed) == set()
     assert log.detached == 1
     assert log_of(CounterReq(tag="mutate-after")).inits == 0
+
+
+async def test_subscription_keeps_the_request_type(domain: Domain):
+    """`subscribe()`의 구독은 요청 타입을 잇고, `stream()`은 `DataModel`을 흘린다.
+
+    타입만의 약속이라 pytest가 아니라 pyright가 지킨다(`assert_type`은 런타임에 아무것도 안 한다).
+    """
+
+    req = CounterReq(tag="typed")
+    async with domain.subscribe(req, Recorder()) as sub:
+        assert_type(sub, Subscription[CounterReq])
+        assert_type(sub.request, CounterReq)
+
+    async with domain.stream(req, {"BTC"}) as stream:
+        assert_type(await anext(stream), DataModel)
 
 
 async def test_session_uses_the_request_as_subscribed(domain: Domain):

@@ -56,7 +56,6 @@ from trading_core import (
     DataModel,
     Domain,
     SourceRequest,
-    cast_model,
     get_model_id,
     get_model_uid,
     initialize,
@@ -147,7 +146,7 @@ async def run_ex(domain: Domain) -> None:
     async with domain.subscribe(req, ignore) as sub:
         await sub.update({"BTC/USD"})
         req.exchange = "B"  # 구독은 사본을 쓰므로 영향이 없다
-        subscribed = cast_model(sub.request, TickReq)  # 구독이 찍어 둔 사본
+        subscribed = sub.request  # 구독이 찍어 둔 사본. 타입도 `TickReq`다
         log.info("구독의 요청", exchange=subscribed.exchange)
         assert subscribed.exchange == "A"
         assert domain.get_shared_symbols(original_id) == {"BTC/USD"}

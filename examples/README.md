@@ -71,6 +71,7 @@ uv run examples/main.py parallel   # 전부를 Domain 하나에서 동시에
 | 27 | `ex27_identifiers.py` | uid·model_id·content_id, 가변 모델, 구독은 요청의 사본 |
 | 28 | `ex28_serialization.py` | `tr_annotation`, `load_model`·`parse_dump`·`cast_model`, 인스턴스 ID |
 | 29 | `ex29_logging.py` | 로그 모듈: 싱크별 레벨, 발신처, 예외 레코드 |
+| 30 | `ex30_data_types.py` | 요청 하나가 데이터 여러 종류를 줄 때 `match`로 가르기 |
 
 ## 예제의 생김새
 

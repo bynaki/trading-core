@@ -1,5 +1,5 @@
 from asyncio import Lock, TaskGroup, current_task, gather
-from collections.abc import AsyncGenerator, Awaitable, Callable, Coroutine, Iterable
+from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, Coroutine, Iterable
 from contextlib import aclosing, asynccontextmanager
 from typing import Any
 
@@ -134,7 +134,9 @@ class Domain:
         self._spawn_seq = 0
 
     @asynccontextmanager
-    async def subscribe(self, req: BaseRequest, sender: Sender, on_error: OnError | None = None):
+    async def subscribe[T: BaseRequest](
+        self, req: T, sender: Sender, on_error: OnError | None = None
+    ) -> AsyncIterator[Subscription[T]]:
         """`req`를 구독하고 데이터를 `sender`로 받는다. 블록을 벗어나면 구독을 끊는다.
 
         구독의 일부 또는 전체가 실패하면 `on_error`로 `StageFailed`를 받는다. 없으면 로그만 남는다.
@@ -145,7 +147,7 @@ class Domain:
         finally:
             await sub.detach()
 
-    def stream(self, req: BaseRequest, symbols: set[str]):
+    def stream(self, req: BaseRequest, symbols: set[str]) -> aclosing[AsyncGenerator[DataModel]]:
         """`req`를 `symbols`로 구독해 데이터를 흘려주는 async generator.
 
         구독이 실패하면 `StageFailed`를 던지고 끝난다.
@@ -202,9 +204,9 @@ class Domain:
         await stage.update(sender, symbols, on_fail)
         return True
 
-    def _create_shared_subscription(
-        self, req: BaseRequest, sender: Sender, on_error: OnError | None
-    ):
+    def _create_shared_subscription[T: BaseRequest](
+        self, req: T, sender: Sender, on_error: OnError | None
+    ) -> Subscription[T]:
         sub = Subscription(
             _STAGE_CREATION_KEY,
             id=self._next_stage_id(req),
@@ -436,9 +438,9 @@ class Domain:
         self._shared_stages[content_id] = stage
         return stage
 
-    def _create_session_subscription(
-        self, req: BaseRequest, sender: Sender, on_error: OnError | None
-    ):
+    def _create_session_subscription[T: BaseRequest](
+        self, req: T, sender: Sender, on_error: OnError | None
+    ) -> Subscription[T]:
         stage_id = self._next_stage_id(req)
         sub = Subscription(
             _STAGE_CREATION_KEY,
@@ -675,9 +677,9 @@ class Domain:
         sub.detach = detach
         return sub
 
-    def _create_subscription(
-        self, req: BaseRequest, sender: Sender, on_error: OnError | None = None
-    ):
+    def _create_subscription[T: BaseRequest](
+        self, req: T, sender: Sender, on_error: OnError | None = None
+    ) -> Subscription[T]:
         # 요청은 가변이다. 호출자가 구독한 뒤 요청을 고치면 content_id가 바뀌어 `detach()`가
         # 엉뚱한 스테이지를 찾고, 처음 스테이지는 아무도 닫지 못한 채 계속 돈다. 구독은
         # 이 순간의 내용에 묶이도록 사본을 쓴다.
@@ -759,8 +761,8 @@ class Domain:
                 await on_error(exc)
                 return
 
-    async def _stream_impl(self, req: BaseRequest, symbols: set[str]):
-        channel = Channel()
+    async def _stream_impl(self, req: BaseRequest, symbols: set[str]) -> AsyncGenerator[DataModel]:
+        channel = Channel[DataModel | StageFailed]()
 
         async def on_error(failed: StageFailed):
             await channel.send(failed)

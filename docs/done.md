@@ -298,3 +298,20 @@ generator의 첫 걸음보다 먼저 락을 잡아, 가드를 빼도 순서상 g
   20건을 받는다(25). `stream()`의 큐는 크기 제한이 없다.
 - `parallel`에서는 29의 파일 집계에 다른 예제의 레코드도 섞인다. 29는 예외 레코드를 자기 로거 이름으로
   고른다.
+
+### [done] api:export-model-validation-error
+`ModelValidationError`(`cast_model()`·`load_model()`·`parse_dump()`가 던진다)를 최상위 `trading_core`에서
+내보낸다. ex28·`tests/test_model.py`가 최상위에서 import한다. `ModelError`의 하위 클래스로 묶지 않았다 —
+`ModelError`는 코드를 잘못 쓴 것, `ModelValidationError`는 받은 입력이 맞지 않는 것이라
+`except ModelError`가 깨진 입력까지 삼키면 안 된다. `TaskManagerError`(`TaskManager`가 비공개)와
+`LogConfigError`(로그 API가 `trading_core.logger` 하위 모듈)는 내보내지 않는다.
+
+### [done] api:typed-subscription
+`subscribe()`가 요청 타입에 제네릭이 되어 `Subscription[T]`를 준다(`sub.request`가 `T`). ex27의
+`cast_model(sub.request, ...)`을 걷었다. `stream()`은 요청을 돌려주지 않으므로 제네릭으로 하지 않고,
+`Unknown`이던 항목 타입을 `DataModel`로 잡았다. 타입 회귀는 `test_subscription_keeps_the_request_type`의
+`assert_type`을 pyright가 잡는다(pytest가 아니다).
+요청 클래스에 데이터 타입을 선언하는 방안(`SourceRequest[TickData]`)은 하지 않는다. 요청과 데이터
+타입은 1:1이 아니고(무엇을 줄지는 binder가 정한다), binder의 yield 타입을 요청의 선언과 정적으로
+맞춰 볼 방법이 없어(타입 변수의 bound에 타입 변수를 못 쓴다) 확인되지 않는 약속이 된다. 종류가
+여럿이면 `match`로 가른다(ex30).

@@ -64,7 +64,7 @@ uv run examples/main.py parallel # 모든 예제를 공유 Domain에서 동시 �
 
 - `README.md`는 **의도적으로 얇다** — 소개·설치·예제 실행법·범위와 한계만 둔다. API가 아직
   자리 잡는 중이라 **코드 예제와 API 이름을 넣지 않는다.** 사용법은 실행되는 `examples/`가 맡는다.
-- 예제는 기능·사건 하나에 파일 하나(`examples/exNN_이름.py`, ex01~ex29)다. 예제별 README는 없고
+- 예제는 기능·사건 하나에 파일 하나(`examples/exNN_이름.py`, ex01~ex30)다. 예제별 README는 없고
   설명은 모듈 docstring(배우는 것·실행·기대 출력·다음 예제)에 둔다. 목차는 `examples/README.md`
   하나다. 예제를 고치면 그 docstring의 기대 출력과, 주제가 바뀌면 목차도 함께 고친다.
 - 예제는 정상/회귀 판정표 대신 핵심 지점에 `assert`를 둔다. `serial`·`parallel`이 회귀를 잡는다.
@@ -76,7 +76,7 @@ uv run examples/main.py parallel # 모든 예제를 공유 Domain에서 동시 �
   `naming.spec.md`(이름 정리 내역), 있을 때만 `HANDOFF.md`.
 - 예제의 묶음: 01~06 소스 요청의 기본, 07~10 파생 요청, 11~16 세션 요청(13은 세션이 content_id로
   공유되지 **않음**), 17~24 실패(`StageFailed`·`on_error`·`SymbolRejected`), 25 느린 소비자,
-  26 등록 실수, 27 식별자·가변 모델, 28 직렬화, 29 로그 모듈.
+  26 등록 실수, 27 식별자·가변 모델, 28 직렬화, 29 로그 모듈, 30 요청 하나·데이터 여러 종류(`match`).
 - 예제 출력은 모두 `trading_core.logger`로 남긴다(`print` 없음). 공용 설정은
   `examples/setting.toml`이고 `main.py`와 각 예제의 `main()`이 `configure()`한다. 로거
   이름은 `__name__`이 아니라 `"ex05.tick"`처럼 직접 준다 — 직접 실행하면 `__main__`이 되어 어느
