@@ -1,39 +1,49 @@
 # trading-core
 
-코인·주식 실시간 스트림을 위한 **타입 안전 비동기 스트리밍 오케스트레이션 코어**입니다.
+**English** | [한국어](README.ko.md)
 
-`trading-core`는 거래소나 증권사에 종속된 WebSocket 클라이언트가 **아닙니다.** 실시간
-시세·체결·호가 스트림을 다룰 때 반복해서 필요한 요청 모델링, 구독 공유, 심볼별 라우팅,
-의존 스트림 연결, 비동기 태스크와 자원 수명 주기를 작은 범용 런타임으로 제공합니다.
-거래소별 인증·구독 메시지·응답 파싱만 어댑터로 구현하면 나머지 흐름은 같은 구조로
-운용할 수 있습니다.
+A **type-safe async streaming orchestration core** for real-time crypto and stock market streams.
 
-## 무엇을 해결하나
+`trading-core` is **not** a WebSocket client tied to a particular exchange or broker. It is a small,
+general-purpose runtime for the work that keeps coming back whenever you handle real-time quotes,
+trades, and order books: modeling requests, sharing subscriptions, routing by symbol, chaining
+dependent streams, managing task and resource lifecycles, and reporting failures. You implement the
+exchange-specific parts — authentication, subscribe messages, response parsing — as **binders**
+(callbacks attached to a request type), and the core runs everything else the same way.
 
-실시간 마켓 데이터 시스템에서는 여러 전략과 지표가 같은 종목을 동시에 구독합니다.
-소비자마다 연결을 새로 만들면 연결 수와 트래픽이 불필요하게 늘어나고, 구독 추가·해제와
-연결 종료도 각자 처리해야 합니다.
+## What it solves
+
+Many strategies and indicators subscribe to the same instruments at once. If every consumer opens
+its own connection, connections and traffic multiply, and each consumer has to handle
+subscribing, unsubscribing, and shutdown on its own.
 
 ```text
-소비자 A (BTC, ETH) ─┐
-                     ├─→ 공유 소스 스트림 (BTC, ETH, XRP) ─→ 심볼 기준 fan-out ─→ 각 소비자
-소비자 B (ETH, XRP) ─┘
+Consumer A (BTC, ETH) ─┐
+                       ├─→ shared source stage (BTC, ETH, XRP) ─→ fan-out by symbol ─→ each consumer
+Consumer B (ETH, XRP) ─┘
 ```
 
-- **동일 요청 공유** — 내용이 같은 요청은 하나의 소스 스트림과 컨텍스트를 공유합니다.
-- **구독 합집합** — 여러 소비자가 요구한 심볼의 합집합만 어댑터에 전달합니다.
-- **심볼별 fan-out** — 소스 데이터는 그 심볼을 구독한 소비자에게만 갑니다.
-- **명시적 수명 주기** — 구독 구성이 달라질 때와 마지막 소비자가 떠날 때를 구분해
-  정리 지점을 줍니다.
-- **스트림 의존성** — 한 스트림의 출력을 다른 스트림의 입력으로 연결할 수 있습니다.
-- **타입이 있는 경계** — 요청과 데이터를 Pydantic 모델로 정의하고 검증·직렬화를
-  그대로 씁니다.
+- **Requests with equal content are shared** — requests whose field values match share one context
+  and one generator.
+- **Symbol union** — a binder receives only the union of the symbols its consumers want, and
+  restarts only when that union changes.
+- **Fan-out by symbol** — data goes only to the consumers subscribed to its symbol.
+- **Dependent streams** — feed one request's output into another request; upstream stages are
+  shared too.
+- **Per-symbol state** — computations that keep state per symbol, such as chart analysis, get a
+  separate slot per symbol.
+- **Explicit lifecycle** — separate cleanup points for when the subscription set changes and when
+  the last consumer leaves.
+- **Failure notification** — failures are not hidden behind retries; each affected consumer is told
+  exactly which of its symbols it lost.
+- **Typed boundaries** — requests and data are Pydantic models, with validation, serialization, and
+  restoring as-is.
 
-## 요구 사항과 설치
+## Installation
 
-- Python 3.14 이상
-- 런타임 의존성: [Pydantic 2](https://docs.pydantic.dev/) 하나뿐
-- 권장 패키지 관리자: [uv](https://docs.astral.sh/uv/)
+- Python 3.14 or later
+- One runtime dependency: [Pydantic 2](https://docs.pydantic.dev/)
+- Recommended package manager: [uv](https://docs.astral.sh/uv/)
 
 ```bash
 git clone https://github.com/bynaki/trading-core.git
@@ -41,79 +51,321 @@ cd trading-core
 uv sync
 ```
 
-다른 uv 프로젝트에서 직접 의존하려면 로컬 경로나 Git 저장소를 쓸 수 있습니다.
+To depend on it from another uv project, use a local path or the Git repository.
 
 ```bash
 uv add /path/to/trading-core
-uv add "https://github.com/bynaki/trading-core.git"
+uv add "git+https://github.com/bynaki/trading-core.git"
 ```
 
-## 사용법을 보려면
+## Quick start
 
-**API는 아직 자리를 잡는 중이라 이 문서에 코드 예제를 두지 않습니다.** 대신
-`examples/`에 **실행되는** 시나리오가 있습니다. 문서와 달리 예제는 낡으면 바로
-깨지므로 항상 현재 API를 보여 줍니다.
+Using the core splits into two sides. The **binder side** defines request models and registers how
+to produce data when such a request arrives (in real code, this is where you connect to the
+exchange and parse messages). The **consumer side** hands a request and symbols to a `Domain` and
+receives data.
+
+```python
+import asyncio
+
+from trading_core import DataModel, Domain, SourceRequest, cast_model, initialize
+
+
+# ----- binder side -----
+class TickReq(SourceRequest):
+    exchange: str  # field values are the request's "content"; equal content is shared
+
+
+class TickData(DataModel):  # DataModel already has a `symbol` field (the routing key)
+    price: float
+
+
+@initialize  # the first parameter's annotation (TickReq) decides which request this binds
+def tick(req: TickReq) -> TickReq:
+    """init callback: called once when the stage starts; builds the context (a connection, etc.)."""
+    return req
+
+
+@tick
+async def _(ctx: TickReq, symbols: set[str]):
+    """generate callback: receives the union of subscribed symbols and yields data forever."""
+    price = 100.0
+    while True:
+        for symbol in sorted(symbols):
+            yield TickData(symbol=symbol, price=price)
+        price += 1
+        await asyncio.sleep(0.2)
+
+
+# ----- consumer side -----
+async def main() -> None:
+    domain = Domain()
+    await domain.start()
+    try:
+        async with domain.stream(TickReq(exchange="mock"), {"BTC", "ETH"}) as stream:
+            async for data in stream:
+                tick_data = cast_model(data, TickData)  # DataModel → TickData
+                print(tick_data.symbol, tick_data.price)
+                if tick_data.price >= 102:
+                    break  # leaving the block unsubscribes and closes the generator
+    finally:
+        await domain.stop()
+
+
+asyncio.run(main())
+```
+
+A request can be used only after its `@initialize` has run, so the module that defines the binders
+must be imported before the `Domain` uses them.
+
+## Core concepts
+
+### Three kinds of requests
+
+| Request | What it does | Shared | Binder receives |
+| --- | --- | --- | --- |
+| `SourceRequest` | Pulls data from outside | Yes, by content | `(ctx, symbols)` |
+| `DerivedRequest` | Transforms another request's data | Yes, by content | `(ctx, symbols, recv)` |
+| `SessionRequest` | Runs a per-symbol pipeline with its own state | No | `(ctx, symbol)` per symbol |
+
+All data is a `DataModel` and is routed to consumers by its `symbol` field.
+
+### Subscribing: `stream()` and `subscribe()`
+
+`stream(req, symbols)` is a convenience API that fixes the symbols up front and runs to the end. To
+change symbols while the subscription stays open, use `subscribe()`. Data arrives through a
+`Sender` (an async function that takes one data item).
+
+```python
+async def on_tick(data: DataModel) -> None:
+    ...
+
+async def on_error(failed: StageFailed) -> None:
+    ...  # failed.symbols: symbols this consumer lost, failed.cause: a summary of the cause
+
+async with domain.subscribe(TickReq(exchange="mock"), on_tick, on_error) as sub:
+    await sub.update({"BTC"})
+    await sub.update({"ETH", "XRP"})  # replaces, does not add — BTC is dropped
+    await sub.update(set())           # an empty set unsubscribes
+```
+
+`domain.get_shared_symbols(req.tr_content_id)` shows the symbol union a shared stage is currently
+running.
+
+### Two cleanup points
+
+```python
+@tick
+async def _(ctx: Connection, symbols: set[str]):
+    try:
+        ...  # yield
+    finally:
+        ...  # each time the generator restarts because the subscribed symbols changed
+
+@tick.detached
+async def _(ctx: Connection):
+    ...  # once, when the last consumer leaves or the stage fails (close the connection, etc.)
+```
+
+The context survives restarts. If a cleanup callback raises, the rest of the cleanup still runs to
+completion.
+
+### Derived requests: building on other streams
+
+Declare the upstream request with `require`, and the `Domain` starts the upstream stage and wires
+it in. Consumers don't need to know about the upstream request. If the upstream names symbols
+differently, `require` can map the symbols as well.
+
+```python
+class PriceReq(DerivedRequest):
+    currency: str
+
+
+@PriceReq.require
+def _(req: PriceReq, symbols: set[str]):  # drop the symbols parameter to pass symbols unchanged
+    return TickReq(exchange="mock"), {f"{s}/USD" for s in symbols}
+
+
+@initialize
+def price(req: PriceReq) -> PriceReq:
+    return req
+
+
+@price
+async def _(ctx: PriceReq, symbols: set[str], recv: Receiver):
+    while True:
+        tick_data = cast_model(await recv(), TickData)  # receive upstream data one item at a time
+        yield PriceData(symbol=tick_data.symbol.removesuffix("/USD"), price=tick_data.price)
+```
+
+Several derived requests with different content still share one upstream stage when their upstream
+request is the same, and the upstream receives the union of the symbols they register. Derived
+requests can be stacked on other derived requests. Circular dependencies are not supported, and
+`require` cannot pick a different upstream request per symbol.
+
+### Session requests: per-symbol pipelines with state
+
+A session request creates one **slot** per symbol, and each slot attaches to an upstream source
+stage through the `Pipeline` its bind callback yields. Steps (`Runnable`) are created per slot, so
+they can safely hold per-symbol state.
+
+```python
+class Change(Runnable[TickData, ChangeData]):
+    def __init__(self, symbol: str) -> None:
+        self.symbol = symbol
+        self.last: float | None = None  # state for this symbol only
+
+    async def invoke(self, input: TickData) -> ChangeData | None:
+        last, self.last = self.last, input.price
+        if last is None:
+            return None  # returning None stops this item here
+        return ChangeData(symbol=self.symbol, change=input.price - last)
+
+
+@initialize
+def change(req: ChangeReq) -> ChangeReq:
+    return req
+
+
+@change  # bind: called once for each newly subscribed symbol
+async def _(ctx: ChangeReq, symbol: str):
+    yield TickReq(exchange="mock")(f"{symbol}/USD") | Change(symbol)
+
+
+@change.unbind  # when that symbol's slot closes; exactly once per bind
+async def _(ctx: ChangeReq, symbol: str): ...
+```
+
+`@change.always` attaches a pipeline that runs regardless of the subscribed symbols, and a bind
+callback that yields several pipelines attaches one slot to several upstreams. The `symbol` a bind
+callback receives is the **downstream notation** the consumer used (`BTC`); the head of the
+pipeline takes the **upstream notation** the upstream knows (`BTC/USD`).
+
+### Failure handling
+
+The core **does not retry.** When an init callback, generator, bind callback, or pipeline step
+raises, the core takes down that stage or slot and notifies each affected consumer through
+`on_error` with a `StageFailed` holding **only that consumer's symbols**. The failure cascades to
+derived and session stages built on top of it, and their `__cause__` points to the upstream
+`StageFailed`.
+
+- Failed symbols are removed from the subscription. To receive them again, the consumer adds them
+  back with `update()`, and a new stage starts from init.
+- If one consumer (`Sender`) raises, only that consumer is detached; the shared generator keeps
+  running.
+- When a binder can't serve a single symbol (a delisting, for example), it raises
+  `SymbolRejected`. The stage keeps running with the remaining symbols and reports only that
+  symbol as failed.
+- `update()` and `subscribe()` don't raise failures. Without `on_error`, only an ERROR log is
+  written. `stream()` raises `StageFailed` and ends.
+- Registration mistakes such as a missing binder go straight to the caller as `BindError`,
+  `DomainError`, or `ModelError`.
+
+Whether to ride out harmless disconnects (by reconnecting, say) is up to the binder, inside its
+generator. If the core retried too, retries would multiply at every stage of a multi-stage request.
+
+### Model identifiers and serialization
+
+| Identifier | Identifies | Used for |
+| --- | --- | --- |
+| content_id (`req.tr_content_id`) | Model type + content | Key for sharing stages |
+| model_id (`get_model_id`) | Class and field structure | Binder registry key, `cast_model()` matching |
+| uid (`get_model_uid`) | A single instance | Tracing which process created which model |
+
+Models are mutable, and changing one recomputes its content_id. They are therefore not hashable;
+use the content_id as the key in sets and dicts. `Domain` takes a copy of the request when you
+subscribe, so editing the original afterwards does not affect the subscription.
+
+`model_dump()` attaches a `tr_annotation`, which `load_model()` uses to find the original class and
+restore the model. `parse_dump()` only validates a dump; mismatched input raises
+`ModelValidationError`.
+
+### Logging
+
+`trading_core.logger` is a JSON logger with console, file, and log-server sinks that can be turned
+on and off. Settings live in the `[log]` section of `setting.toml` (every key is described in
+[setting.example.toml](setting.example.toml)), and each record carries its origin as `service`,
+`host`, and `pid`. Loggers from the core and from your application are collected into the same
+sinks.
+
+```python
+from trading_core.logger import configure, get_logger
+
+configure("setting.toml")  # if omitted, the first log call looks at TRADING_CORE_SETTINGS, then ./setting.toml
+log = get_logger("my_app.strategy")
+log.info("order signal", symbol="BTC", price=101.0)
+```
+
+Actually sending records to a log server is not implemented yet (`[log.server] enabled = true` is a
+configuration error).
+
+## Examples
+
+`examples/` holds 30 **runnable** examples, one feature or event per file. Each file starts with
+what it teaches and its expected output, and asserts at key points — so if an example runs to the
+end, the behavior it shows still holds in the current code. The examples' comments and log output
+are in Korean.
+
+| Part | Examples | Covers |
+| --- | --- | --- |
+| 1 | ex01–06 | Source request basics: `stream`/`subscribe`, cleanup points, sharing, union, restarts |
+| 2 | ex07–10 | Derived requests: `require`, symbol mapping, choosing an upstream, derived on derived |
+| 3 | ex11–16 | Session requests: slots and `Pipeline`, unbind, no sharing, multi-step, multiple upstreams, `always` |
+| 4 | ex17–24 | Failures: `StageFailed` cascades, consumer failure, cleanup failure, init failure, `SymbolRejected` |
+| 5 | ex25–30 | Slow consumers, registration mistakes, identifiers, serialization, logging, multiple data types |
 
 ```bash
-uv run examples/main.py ex01      # 예제 하나
-uv run examples/main.py serial    # 전체를 공유 Domain에서 순차 실행
-uv run examples/main.py parallel  # 전체를 공유 Domain에서 동시 실행
-uv run examples/main.py --help    # 예제 목록
+uv run examples/ex01_stream.py    # run one file directly
+uv run examples/main.py ex01      # run by number
+uv run examples/main.py serial    # run all, one after another, on one Domain
+uv run examples/main.py parallel  # run all concurrently on one Domain
+uv run examples/main.py --help    # list the examples
 ```
 
-예제는 기능이나 사건 하나에 파일 하나이고, 무엇을 배우는지와 기대 출력이 파일 맨 위에 있습니다.
-목차는 [examples/README.md](examples/README.md)에 있습니다. 처음이라면
-`examples/ex01_stream.py`부터 차례로 보세요. 예제마다 `assert`가 있어, 끝까지 돌면 예제가 보이는
-동작이 지금 코드에서도 그대로라는 뜻입니다.
+The full table of contents is in [examples/README.md](examples/README.md). If you're new, start at
+ex01 and go in order. The ERROR logs and tracebacks in part 4 record failures the examples cause on
+purpose.
 
-예제 출력은 모두 로그로 나갑니다. 줄마다 붙는 로거 이름(`ex01`, `ex05.tick` 등)이 어느
-예제의 어느 부분이 남긴 줄인지 알려 주므로, `parallel`처럼 여러 예제가 섞여도 가려 볼 수
-있습니다. 예제 공용 로그 설정은 `examples/setting.toml`이며, 콘솔은 시각과 발신처를 뺀 짧은
-형식으로 찍힙니다.
+## Scope and limitations
 
-구조와 설계 원칙은 [CLAUDE.md](CLAUDE.md)에 정리되어 있습니다.
+Version `0.1.0`.
 
-## 현재 상태
+What the core handles:
 
-버전 `0.1.0`. **API가 바뀝니다.** 프로덕션에 쓰기 전에 아래를 확인하세요.
+- Request and data models, content-based identifiers, serialization and restoring
+- Binder registration and lookup by request type
+- In-memory sharing of stages for requests with equal content, symbol union management, and
+  per-consumer routing
+- Dependent stream chaining and session streams with per-symbol state
+- Async task cancellation and cleanup points for binders and contexts
+- Per-symbol failure notification
+- JSON logging that records each record's origin
 
-담당하는 것:
+What binders or your application must handle:
 
-- 요청·데이터 모델과 내용 기반 식별자
-- 어댑터 등록과 타입 기반 조회
-- 내용이 같은 요청의 in-memory 소스 스트림 공유
-- 소비자별 심볼 라우팅과 구독 합집합 관리
-- 의존 스트림 연결
-- 심볼마다 상태를 따로 갖는 세션 스트림(공유하지 않음)
-- 비동기 태스크 취소와 어댑터·컨텍스트 정리 지점
-- 실패 알림: 어댑터가 던지면 재시도하지 않고 그 스트림을 내린 뒤, 영향받은 소비자에게 각자
-  잃은 심볼만 알림. 소비자 하나가 던지면 그 소비자만 떼어 냄. 어댑터는 심볼 하나만 거부할 수도 있음
+- WebSocket/REST clients for specific exchanges or brokers
+- Authentication, heartbeats, automatic reconnection, resubscription, rate limits (the core only
+  reports failures and never retries)
+- Mapping between exchange symbols and internal standard symbols
+- Sequence gaps, snapshot/delta consistency, duplicates and reordering
+- Order execution, portfolio, risk, storage, strategies and indicators
+- Sharing streams across processes or servers
+- Bounded queues and backpressure (a slow consumer slows the shared stream down — ex25 shows how to
+  decouple it with its own queue)
 
-아직 담당하지 않는 것 — 어댑터에서 직접 다뤄야 합니다:
-
-- 특정 거래소·증권사의 WebSocket/REST 클라이언트
-- 인증, heartbeat, 자동 재연결, 재구독, rate limit 정책 (코어는 실패를 알리기만 하고 다시 시도하지
-  않음)
-- 거래소 심볼과 내부 표준 심볼의 변환 규칙
-- sequence 누락, snapshot/delta 정합성, 중복·순서 뒤바뀜 처리
-- 주문 실행, 포트폴리오, 리스크, 저장소, 전략·지표 구현
-- 프로세스·서버 간 소스 스트림 공유
-- bounded queue와 backpressure 정책 (느린 소비자는 공유 스트림을 함께 늦춤)
-
-## 개발
-
-코드를 고친 뒤 아래 네 검사를 모두 통과해야 합니다.
+## Development
 
 ```bash
 uv run ruff check .
-uv run ruff format --check .   # 적용은 uv run ruff format .
+uv run ruff format --check .   # apply with: uv run ruff format .
 uv run pyright
 uv run pytest
 ```
 
-`src/`를 고쳤으면 `uv run examples/main.py serial`도 한 번 돌려 보세요. 테스트가
-프레임워크 불변식을 덮지만 예제까지 함께 돌지는 않습니다.
+After changing code, make all four checks pass. Tests don't run the examples, so if you changed
+`src/`, also run `uv run examples/main.py serial`. The structure and design invariants are
+documented in [AGENTS.md](AGENTS.md) (in Korean).
 
-## 라이선스
+## License
 
 [MIT License](LICENSE)

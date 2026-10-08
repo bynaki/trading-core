@@ -1,7 +1,7 @@
 [project]
 name = "trading-core"
 version = "0.1.0"
-description = "Market-agnostic trading strategy & indicator library"
+description = "Type-safe async streaming orchestration core for real-time market data"
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
